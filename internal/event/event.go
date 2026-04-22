@@ -24,6 +24,32 @@ func ValidType(t string) bool {
 	return false
 }
 
+// Valid status values for tasks.
+const (
+	StatusBacklog    = "backlog"
+	StatusInProgress = "in_progress"
+	StatusTesting    = "testing"
+	StatusComplete   = "complete"
+	StatusDone       = "done"
+)
+
+var validStatuses = map[string]bool{
+	StatusBacklog:    true,
+	StatusInProgress: true,
+	StatusTesting:    true,
+	StatusComplete:   true,
+	StatusDone:       true,
+}
+
+func ValidStatus(s string) bool {
+	return validStatuses[s]
+}
+
+// AllStatuses returns the ordered list of kanban columns.
+func AllStatuses() []string {
+	return []string{StatusBacklog, StatusInProgress, StatusTesting, StatusComplete, StatusDone}
+}
+
 type Event struct {
 	ID        int64
 	TS        int64
@@ -36,6 +62,7 @@ type Event struct {
 	SessionID sql.NullString
 	Source    string
 	MetaJSON  sql.NullString
+	Status    sql.NullString
 }
 
 type Insert struct {
@@ -48,6 +75,7 @@ type Insert struct {
 	SessionID string
 	Source    string
 	MetaJSON  string
+	Status    string
 }
 
 func Add(d *sql.DB, in Insert) (int64, error) {
@@ -63,9 +91,13 @@ func Add(d *sql.DB, in Insert) (int64, error) {
 	if in.Source == "" {
 		in.Source = "manual"
 	}
+	// Default status for new tasks
+	if in.Status == "" && in.Type == TaskNew {
+		in.Status = StatusBacklog
+	}
 	res, err := d.Exec(`
-        INSERT INTO events (ts, type, project, scope, title, body, ref_id, session_id, source, meta_json)
-        VALUES (?,  ?,    ?,       ?,     ?,     ?,    ?,      ?,          ?,      ?)
+        INSERT INTO events (ts, type, project, scope, title, body, ref_id, session_id, source, meta_json, status)
+        VALUES (?,  ?,    ?,       ?,     ?,     ?,    ?,      ?,          ?,      ?,     ?)
     `,
 		time.Now().Unix(),
 		string(in.Type),
@@ -77,6 +109,7 @@ func Add(d *sql.DB, in Insert) (int64, error) {
 		nullStr(in.SessionID),
 		in.Source,
 		nullStr(in.MetaJSON),
+		nullStr(in.Status),
 	)
 	if err != nil {
 		return 0, err

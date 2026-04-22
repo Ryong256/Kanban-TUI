@@ -33,6 +33,11 @@ func Open() (*sql.DB, error) {
 }
 
 func migrate(d *sql.DB) error {
+	// Create migration tracking table
+	if _, err := d.Exec(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)`); err != nil {
+		return fmt.Errorf("create _migrations table: %w", err)
+	}
+
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
 		return err
@@ -45,12 +50,26 @@ func migrate(d *sql.DB) error {
 	}
 	sort.Strings(names)
 	for _, n := range names {
+		// Skip already-applied migrations
+		var count int
+		if err := d.QueryRow(`SELECT COUNT(*) FROM _migrations WHERE name = ?`, n).Scan(&count); err != nil {
+			return fmt.Errorf("check migration %s: %w", n, err)
+		}
+		if count > 0 {
+			continue
+		}
+
 		b, err := migrationsFS.ReadFile("migrations/" + n)
 		if err != nil {
 			return err
 		}
 		if _, err := d.Exec(string(b)); err != nil {
 			return fmt.Errorf("%s: %w", n, err)
+		}
+
+		// Mark as applied
+		if _, err := d.Exec(`INSERT INTO _migrations (name) VALUES (?)`, n); err != nil {
+			return fmt.Errorf("record migration %s: %w", n, err)
 		}
 	}
 	return nil

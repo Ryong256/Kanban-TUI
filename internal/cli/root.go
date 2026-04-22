@@ -16,9 +16,12 @@ func NewRoot() *cobra.Command {
 		newAddCmd(),
 		newListCmd(),
 		newDoneCmd(),
+		newMoveCmd(),
 		newEventCmd(),
 		newCountCmd(),
 		newScopeCmd(),
+		newViewCmd(),
+		newProjectCmd(),
 	)
 	return root
 }

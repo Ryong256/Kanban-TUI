@@ -19,6 +19,7 @@ func newEventCmd() *cobra.Command {
 		sessionID string
 		source    string
 		metaJSON  string
+		status    string
 	)
 	cmd := &cobra.Command{
 		Use:   "event",
@@ -48,6 +49,7 @@ func newEventCmd() *cobra.Command {
 				SessionID: sessionID,
 				Source:    source,
 				MetaJSON:  metaJSON,
+				Status:    status,
 			})
 			if err != nil {
 				return err
@@ -65,6 +67,7 @@ func newEventCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sessionID, "session", "", "Claude Code session id")
 	cmd.Flags().StringVar(&source, "source", "agent", "source: manual | hook-stop | hook-post | agent")
 	cmd.Flags().StringVar(&metaJSON, "meta", "", "extra JSON metadata")
+	cmd.Flags().StringVar(&status, "status", "", "task status: backlog|in_progress|testing|complete|done")
 	_ = cmd.MarkFlagRequired("type")
 	_ = cmd.MarkFlagRequired("title")
 	return cmd

@@ -37,18 +37,22 @@ func newListCmd() *cobra.Command {
 				fmt.Println("no open tasks")
 				return nil
 			}
-			for _, t := range tasks {
-				when := time.Unix(t.TS, 0).Format("Jan 02 15:04")
-				scope := ""
-				if t.Scope.Valid && t.Scope.String != "" {
-					scope = " [" + t.Scope.String + "]"
-				}
-				proj := ""
-				if all {
-					proj = " (" + t.Project + ")"
-				}
-				fmt.Printf("#%-4d  %s%s%s  %s\n", t.ID, when, proj, scope, t.Title)
+		for _, t := range tasks {
+			when := time.Unix(t.TS, 0).Format("Jan 02 15:04")
+			scope := ""
+			if t.Scope.Valid && t.Scope.String != "" {
+				scope = " [" + t.Scope.String + "]"
 			}
+			proj := ""
+			if all {
+				proj = " (" + t.Project + ")"
+			}
+			status := ""
+			if t.Status != "" && t.Status != "backlog" {
+				status = " <" + t.Status + ">"
+			}
+			fmt.Printf("#%-4d  %s%s%s%s  %s\n", t.ID, when, proj, scope, status, t.Title)
+		}
 			return nil
 		},
 	}
