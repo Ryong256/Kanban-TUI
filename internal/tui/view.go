@@ -170,11 +170,11 @@ func (m *Model) viewBoard() string {
 		b.WriteString(errStyle.Render("Error: "+m.err.Error()) + "\n")
 	} else {
 		shortcuts := []string{
-			"h/l: columns",
+			"h/l: nav",
 			"j/k: tasks",
-			"enter: →",
-			"bksp: ←",
-			"i: detail",
+			"H/L: move",
+			"1-5: jump",
+			"enter/i: detail",
 			"a: add",
 			"tab: project",
 			"q: quit",

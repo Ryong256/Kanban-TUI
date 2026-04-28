@@ -41,6 +41,10 @@ type Model struct {
 	detailTask     *event.OpenTask
 	detailTimeline []event.TimelineEntry
 
+	// Cursor follows the task across moves: set when a move is dispatched,
+	// applied (and cleared) on the next boardLoadedMsg.
+	pendingFocusTaskID int64
+
 	// Layout
 	width  int
 	height int
@@ -111,7 +115,9 @@ type boardLoadedMsg struct {
 	board map[string][]event.OpenTask
 }
 
-type taskMovedMsg struct{}
+type taskMovedMsg struct {
+	taskID int64
+}
 type taskAddedMsg struct{}
 
 type detailLoadedMsg struct {

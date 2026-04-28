@@ -29,9 +29,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case boardLoadedMsg:
 		m.board = msg.board
+		if m.pendingFocusTaskID != 0 {
+			m.focusTask(m.pendingFocusTaskID)
+			m.pendingFocusTaskID = 0
+		}
 		m.clampCursors()
 
 	case taskMovedMsg:
+		m.pendingFocusTaskID = msg.taskID
 		return m, m.loadBoard()
 
 	case taskAddedMsg:
@@ -92,9 +97,16 @@ func (m *Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.rowIdx[m.colIdx]--
 		}
 
-	// Move task to previous status (left)
-	case "backspace":
+	// Move task across columns (cursor follows)
+	case "H", "shift+left":
 		return m.moveTaskLeft()
+
+	case "L", "shift+right":
+		return m.moveTaskRight()
+
+	// Jump task directly to a column by number (1=backlog … 5=done)
+	case "1", "2", "3", "4", "5":
+		return m.moveTaskToCol(int(msg.String()[0] - '1'))
 
 	// Add task
 	case "a":
@@ -125,17 +137,38 @@ func (m *Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Task detail
 	case "i", "enter":
-		if msg.String() == "i" {
-			task, ok := m.selectedTask()
-			if ok {
-				return m, m.loadDetail(task)
-			}
-		} else {
-			return m.moveTaskRight()
+		task, ok := m.selectedTask()
+		if ok {
+			return m, m.loadDetail(task)
 		}
 	}
 
 	return m, nil
+}
+
+func (m *Model) moveTaskToCol(targetIdx int) (tea.Model, tea.Cmd) {
+	if targetIdx < 0 || targetIdx >= len(columns) || targetIdx == m.colIdx {
+		return m, nil
+	}
+	task, ok := m.selectedTask()
+	if !ok {
+		return m, nil
+	}
+	return m, m.moveTask(task.ID, columns[targetIdx])
+}
+
+// focusTask locates a task by ID across all columns and points the cursor at it.
+// Called after a move to keep the cursor on the task the user just moved.
+func (m *Model) focusTask(taskID int64) {
+	for i, col := range columns {
+		for j, t := range m.board[col] {
+			if t.ID == taskID {
+				m.colIdx = i
+				m.rowIdx[i] = j
+				return
+			}
+		}
+	}
 }
 
 func (m *Model) moveTaskRight() (tea.Model, tea.Cmd) {
@@ -177,7 +210,7 @@ func (m *Model) moveTask(taskID int64, newStatus string) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return taskMovedMsg{}
+		return taskMovedMsg{taskID: taskID}
 	}
 }
 
