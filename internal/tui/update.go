@@ -26,9 +26,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tabsLoadedMsg:
 		m.tabs = []string{"All"}
 		m.tabs = append(m.tabs, msg.names...)
+		// If an initial project was requested, switch to its tab.
+		if m.initialProject != "" {
+			for i, name := range m.tabs {
+				if name == m.initialProject {
+					m.activeTab = i
+					m.initialProject = "" // consume so we don't re-apply on subsequent reloads
+					return m, m.loadBoard()
+				}
+			}
+			// Requested project not in registry — stay on "All".
+			m.initialProject = ""
+		}
 
 	case boardLoadedMsg:
 		m.board = msg.board
+		m.doneTotal = msg.doneTotal
 		if m.pendingFocusTaskID != 0 {
 			m.focusTask(m.pendingFocusTaskID)
 			m.pendingFocusTaskID = 0

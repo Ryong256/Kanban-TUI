@@ -24,7 +24,7 @@ func newDoneCmd() *cobra.Command {
 				return err
 			}
 			defer d.Close()
-			doneID, err := event.MarkDone(d, id, "")
+			doneID, err := event.MarkDone(d, id)
 			if err != nil {
 				return err
 			}

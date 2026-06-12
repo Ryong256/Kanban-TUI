@@ -52,13 +52,16 @@ func ListOpen(d *sql.DB, project string, limit int) ([]OpenTask, error) {
 	return out, rows.Err()
 }
 
-// ListAllByStatus returns ALL tasks (including done) for a project grouped by their current status.
-// Unlike ListOpen, this does NOT filter out tasks that have a task.done event.
-func ListByStatus(d *sql.DB, project string) (map[string][]OpenTask, error) {
+// ListByStatus returns ALL tasks (including done) grouped by their current status.
+// The done column is ordered by most-recent activity (latest event ts) and
+// limited to doneLimit rows; DoneTotal carries the true total so the column
+// header can display it.
+func ListByStatus(d *sql.DB, project string, doneLimit int) (*BoardResult, error) {
+	// Non-done tasks: order by created_ts DESC (original behaviour).
 	q := `
         SELECT t.id, t.created_ts, t.project, t.scope, t.title, t.body, t.status
         FROM   v_task_latest t
-        WHERE  1 = 1
+        WHERE  t.status != 'done'
     `
 	args := []any{}
 	if project != "" {
@@ -72,9 +75,11 @@ func ListByStatus(d *sql.DB, project string) (map[string][]OpenTask, error) {
 	}
 	defer rows.Close()
 
-	grouped := make(map[string][]OpenTask)
+	result := &BoardResult{
+		Board: make(map[string][]OpenTask),
+	}
 	for _, s := range AllStatuses() {
-		grouped[s] = []OpenTask{} // initialize all columns even if empty
+		result.Board[s] = []OpenTask{} // initialize all columns even if empty
 	}
 	for rows.Next() {
 		var t OpenTask
@@ -85,12 +90,94 @@ func ListByStatus(d *sql.DB, project string) (map[string][]OpenTask, error) {
 		if status == "" {
 			status = StatusBacklog
 		}
-		// Only add to known columns; ignore unknown statuses
-		if _, ok := grouped[status]; ok {
-			grouped[status] = append(grouped[status], t)
+		if _, ok := result.Board[status]; ok {
+			result.Board[status] = append(result.Board[status], t)
 		}
 	}
-	return grouped, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Done tasks: ordered by most-recent activity ts DESC.
+	// We fetch the true total first, then the limited list.
+	doneRows, err := listDone(d, project, doneLimit)
+	if err != nil {
+		return nil, err
+	}
+	if doneRows.Tasks == nil {
+		doneRows.Tasks = []OpenTask{}
+	}
+	result.Board[StatusDone] = doneRows.Tasks
+	result.DoneTotal = doneRows.Total
+	return result, nil
+}
+
+// BoardResult is returned by ListByStatus.
+type BoardResult struct {
+	Board     map[string][]OpenTask
+	DoneTotal int // true total of done tasks (may be > len(Board[done]) when capped)
+}
+
+// doneQueryResult holds the limited task slice and the true total.
+type doneQueryResult struct {
+	Tasks []OpenTask
+	Total int
+}
+
+// listDone fetches done tasks ordered by most-recent activity (MAX event ts for
+// each task), limited to limit rows. Total is always the uncapped count.
+func listDone(d *sql.DB, proj string, limit int) (doneQueryResult, error) {
+	// Count total done tasks.
+	cntQ := `
+        SELECT COUNT(*)
+        FROM   v_task_latest t
+        WHERE  t.status = 'done'
+    `
+	cntArgs := []any{}
+	if proj != "" {
+		cntQ += " AND t.project = ? "
+		cntArgs = append(cntArgs, proj)
+	}
+	var total int
+	if err := d.QueryRow(cntQ, cntArgs...).Scan(&total); err != nil {
+		return doneQueryResult{}, err
+	}
+
+	// Fetch limited list ordered by most-recent activity.
+	q := `
+        SELECT t.id, t.created_ts, t.project, t.scope, t.title, t.body, t.status
+        FROM   v_task_latest t
+        WHERE  t.status = 'done'
+    `
+	args := []any{}
+	if proj != "" {
+		q += " AND t.project = ? "
+		args = append(args, proj)
+	}
+	q += `
+        ORDER BY (
+            SELECT MAX(e.ts) FROM events e WHERE e.id = t.id OR e.ref_id = t.id
+        ) DESC
+    `
+	if limit > 0 {
+		q += " LIMIT ? "
+		args = append(args, limit)
+	}
+
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return doneQueryResult{}, err
+	}
+	defer rows.Close()
+	var tasks []OpenTask
+	for rows.Next() {
+		var t OpenTask
+		if err := rows.Scan(&t.ID, &t.TS, &t.Project, &t.Scope, &t.Title, &t.Body, &t.Status); err != nil {
+			return doneQueryResult{}, err
+		}
+		tasks = append(tasks, t)
+	}
+	return doneQueryResult{Tasks: tasks, Total: total}, rows.Err()
 }
 
 // MoveTask transitions a task to a new status by appending a task.update event.
@@ -212,6 +299,6 @@ func TaskTimeline(d *sql.DB, taskID int64) ([]TimelineEntry, error) {
 }
 
 // MarkDone is kept for backward compat with CLI `kb done <id>`.
-func MarkDone(d *sql.DB, refID int64, project string) (int64, error) {
+func MarkDone(d *sql.DB, refID int64) (int64, error) {
 	return MoveTask(d, refID, StatusDone, "manual")
 }

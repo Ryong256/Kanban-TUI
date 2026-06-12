@@ -24,12 +24,14 @@ type Model struct {
 	db *sql.DB
 
 	// Tab state
-	tabs      []string // "All" + registered project names
-	activeTab int
+	tabs           []string // "All" + registered project names
+	activeTab      int
+	initialProject string // project to select on first tab load
 
 	// Board state
 	screen    Screen
-	board     map[string][]event.OpenTask // status → tasks
+	board     map[string][]event.OpenTask // status → tasks (done capped at doneLimit)
+	doneTotal int                         // true total done tasks (for column header)
 	colIdx    int                         // active column index (0-4)
 	rowIdx    []int                       // cursor row per column
 
@@ -53,11 +55,12 @@ type Model struct {
 
 func NewModel(db *sql.DB, initialProject string) *Model {
 	m := &Model{
-		db:     db,
-		screen: ScreenBoard,
-		board:  make(map[string][]event.OpenTask),
-		rowIdx: make([]int, len(columns)),
-		tabs:   []string{"All"},
+		db:             db,
+		screen:         ScreenBoard,
+		board:          make(map[string][]event.OpenTask),
+		rowIdx:         make([]int, len(columns)),
+		tabs:           []string{"All"},
+		initialProject: initialProject,
 	}
 	return m
 }
@@ -89,11 +92,11 @@ func (m *Model) loadTabs() tea.Cmd {
 func (m *Model) loadBoard() tea.Cmd {
 	return func() tea.Msg {
 		proj := m.activeProject()
-		grouped, err := event.ListByStatus(m.db, proj)
+		result, err := event.ListByStatus(m.db, proj, doneLimit)
 		if err != nil {
 			return errMsg{err}
 		}
-		return boardLoadedMsg{grouped}
+		return boardLoadedMsg{board: result.Board, doneTotal: result.DoneTotal}
 	}
 }
 
@@ -112,7 +115,8 @@ type tabsLoadedMsg struct {
 }
 
 type boardLoadedMsg struct {
-	board map[string][]event.OpenTask
+	board     map[string][]event.OpenTask
+	doneTotal int
 }
 
 type taskMovedMsg struct {
