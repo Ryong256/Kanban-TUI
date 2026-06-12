@@ -25,7 +25,7 @@ func newViewCmd() *cobra.Command {
 
 			p := ""
 			if !all {
-				p = DetectProject(project)
+				p = DetectProjectDB(d, project)
 			}
 
 			m := tui.NewModel(d, p)

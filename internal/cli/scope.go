@@ -21,7 +21,7 @@ func newScopeCmd() *cobra.Command {
 				return err
 			}
 			defer d.Close()
-			entries, err := event.ScopeTimeline(d, DetectProject(project), args[0])
+			entries, err := event.ScopeTimeline(d, DetectProjectDB(d, project), args[0])
 			if err != nil {
 				return err
 			}

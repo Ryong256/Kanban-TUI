@@ -22,6 +22,7 @@ func NewRoot() *cobra.Command {
 		newScopeCmd(),
 		newViewCmd(),
 		newProjectCmd(),
+		newDetectProjectCmd(),
 	)
 	return root
 }

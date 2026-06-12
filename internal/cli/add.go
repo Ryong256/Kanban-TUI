@@ -27,7 +27,7 @@ func newAddCmd() *cobra.Command {
 			defer d.Close()
 			id, err := event.Add(d, event.Insert{
 				Type:    event.TaskNew,
-				Project: DetectProject(project),
+				Project: DetectAndRegisterProject(d, project),
 				Scope:   scope,
 				Title:   strings.Join(args, " "),
 				Body:    body,

@@ -27,7 +27,7 @@ func newListCmd() *cobra.Command {
 			defer d.Close()
 			p := ""
 			if !all {
-				p = DetectProject(project)
+				p = DetectProjectDB(d, project)
 			}
 			tasks, err := event.ListOpen(d, p, limit)
 			if err != nil {

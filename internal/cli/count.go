@@ -27,7 +27,7 @@ func newCountCmd() *cobra.Command {
 			defer d.Close()
 			p := ""
 			if !all {
-				p = DetectProject(project)
+				p = DetectProjectDB(d, project)
 			}
 			n, err := event.CountOpen(d, p)
 			if err != nil {

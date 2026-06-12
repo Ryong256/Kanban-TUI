@@ -41,7 +41,7 @@ func newEventCmd() *cobra.Command {
 			defer d.Close()
 			id, err := event.Add(d, event.Insert{
 				Type:      event.Type(typ),
-				Project:   DetectProject(project),
+				Project:   DetectAndRegisterProject(d, project),
 				Scope:     scope,
 				Title:     title,
 				Body:      body,
