@@ -18,7 +18,7 @@ const (
 )
 
 // columns maps to event.AllStatuses() indices.
-var columns = event.AllStatuses() // backlog, in_progress, testing, complete, done
+var columns = event.AllStatuses() // backlog, in_progress, testing, done
 
 type Model struct {
 	db *sql.DB
@@ -32,7 +32,7 @@ type Model struct {
 	screen    Screen
 	board     map[string][]event.OpenTask // status → tasks (done capped at doneLimit)
 	doneTotal int                         // true total done tasks (for column header)
-	colIdx    int                         // active column index (0-4)
+	colIdx    int                         // active column index (0-3)
 	rowIdx    []int                       // cursor row per column
 
 	// Add task state

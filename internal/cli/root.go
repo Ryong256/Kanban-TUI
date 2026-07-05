@@ -23,6 +23,8 @@ func NewRoot() *cobra.Command {
 		newViewCmd(),
 		newProjectCmd(),
 		newDetectProjectCmd(),
+		newVersionCmd(),
+		newUpdateCmd(),
 	)
 	return root
 }

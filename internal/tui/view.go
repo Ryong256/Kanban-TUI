@@ -34,15 +34,13 @@ var colHeaderStyle = map[string]lipgloss.Style{
 	event.StatusBacklog:    lipgloss.NewStyle().Bold(true).Foreground(blue),
 	event.StatusInProgress: lipgloss.NewStyle().Bold(true).Foreground(yellow),
 	event.StatusTesting:    lipgloss.NewStyle().Bold(true).Foreground(magenta),
-	event.StatusComplete:   lipgloss.NewStyle().Bold(true).Foreground(green),
-	event.StatusDone:       lipgloss.NewStyle().Bold(true).Foreground(dim),
+	event.StatusDone:       lipgloss.NewStyle().Bold(true).Foreground(green),
 }
 
 var colHeaderLabel = map[string]string{
 	event.StatusBacklog:    "BACKLOG",
 	event.StatusInProgress: "IN PROGRESS",
 	event.StatusTesting:    "TESTING",
-	event.StatusComplete:   "COMPLETE",
 	event.StatusDone:       "DONE",
 }
 
@@ -250,7 +248,7 @@ func (m *Model) viewBoard() string {
 			"h/l: nav",
 			"j/k: tasks",
 			"H/L: move",
-			"1-5: jump",
+			"1-4: jump",
 			"enter/i: detail",
 			"a: add",
 			"tab: project",

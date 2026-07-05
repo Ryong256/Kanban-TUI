@@ -137,7 +137,7 @@ func TestActiveProject_project_tab(t *testing.T) {
 	}
 }
 
-// --- initialProject tab selection (Task 479) ---
+// --- initialProject tab selection ---
 
 func TestTabsLoaded_initialProject_switches_tab(t *testing.T) {
 	m := newTestModel()

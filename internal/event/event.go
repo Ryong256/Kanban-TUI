@@ -29,7 +29,6 @@ const (
 	StatusBacklog    = "backlog"
 	StatusInProgress = "in_progress"
 	StatusTesting    = "testing"
-	StatusComplete   = "complete"
 	StatusDone       = "done"
 )
 
@@ -37,7 +36,6 @@ var validStatuses = map[string]bool{
 	StatusBacklog:    true,
 	StatusInProgress: true,
 	StatusTesting:    true,
-	StatusComplete:   true,
 	StatusDone:       true,
 }
 
@@ -47,7 +45,7 @@ func ValidStatus(s string) bool {
 
 // AllStatuses returns the ordered list of kanban columns.
 func AllStatuses() []string {
-	return []string{StatusBacklog, StatusInProgress, StatusTesting, StatusComplete, StatusDone}
+	return []string{StatusBacklog, StatusInProgress, StatusTesting, StatusDone}
 }
 
 type Event struct {

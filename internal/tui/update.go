@@ -117,8 +117,8 @@ func (m *Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "L", "shift+right":
 		return m.moveTaskRight()
 
-	// Jump task directly to a column by number (1=backlog … 5=done)
-	case "1", "2", "3", "4", "5":
+	// Jump task directly to a column by number (1=backlog … 4=done)
+	case "1", "2", "3", "4":
 		return m.moveTaskToCol(int(msg.String()[0] - '1'))
 
 	// Add task
