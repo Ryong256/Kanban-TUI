@@ -241,6 +241,125 @@ func CountOpen(d *sql.DB, project string) (int, error) {
 	return n, err
 }
 
+// DeleteTask removes a task and every event referencing it.
+//
+// The log is append-only for history that means something. A task filed by
+// mistake has no history worth keeping, and closing it as done would be a lie:
+// it was never work. Deleting is the honest operation, and leaving no way to do
+// it is what let the board fill with rows nobody could ever clear.
+func DeleteTask(d *sql.DB, taskID int64) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var typ string
+	if err := tx.QueryRow(`SELECT type FROM events WHERE id = ?`, taskID).Scan(&typ); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("event #%d not found", taskID)
+		}
+		return err
+	}
+	if typ != string(TaskNew) && typ != string(Note) {
+		return fmt.Errorf("event #%d is a %s, not a task or note", taskID, typ)
+	}
+
+	// Children first: ref_id has a foreign key onto events(id).
+	if _, err := tx.Exec(`DELETE FROM events WHERE ref_id = ?`, taskID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM events WHERE id = ?`, taskID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ConvertTaskToNote reclassifies a task as a note: it keeps the title, body and
+// scope, drops the status, and discards the task's status history.
+//
+// This is the non-destructive way to clear a backlog row that was never work —
+// a status report filed as a task. The content survives, the board is freed.
+func ConvertTaskToNote(d *sql.DB, taskID int64) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var typ string
+	if err := tx.QueryRow(`SELECT type FROM events WHERE id = ?`, taskID).Scan(&typ); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("task #%d not found", taskID)
+		}
+		return err
+	}
+	if typ == string(Note) {
+		return nil // already a note
+	}
+	if typ != string(TaskNew) {
+		return fmt.Errorf("event #%d is a %s, not a task", taskID, typ)
+	}
+
+	// A note has no lifecycle, so the task.update/task.done rows pointing at it
+	// become meaningless. Keeping them would leave v_task_latest resolving a
+	// status for a row that no longer has one.
+	if _, err := tx.Exec(`DELETE FROM events WHERE ref_id = ?`, taskID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`UPDATE events SET type = 'note', status = NULL WHERE id = ?`, taskID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// NoteEntry is a standalone log entry. Notes carry no status and never appear
+// on the board; they exist so that "this happened" has somewhere to go other
+// than the backlog.
+type NoteEntry struct {
+	ID      int64
+	TS      int64
+	Project string
+	Scope   sql.NullString
+	Title   string
+	Body    sql.NullString
+}
+
+// ListNotes returns the most recent notes, newest first.
+func ListNotes(d *sql.DB, project string, limit int) ([]NoteEntry, error) {
+	q := `
+        SELECT id, ts, project, scope, title, body
+        FROM   events
+        WHERE  type = 'note'
+    `
+	args := []any{}
+	if project != "" {
+		q += " AND project = ? "
+		args = append(args, project)
+	}
+	q += " ORDER BY ts DESC, id DESC "
+	if limit > 0 {
+		q += " LIMIT ? "
+		args = append(args, limit)
+	}
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []NoteEntry
+	for rows.Next() {
+		var n NoteEntry
+		if err := rows.Scan(&n.ID, &n.TS, &n.Project, &n.Scope, &n.Title, &n.Body); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 type TimelineEntry struct {
 	ID    int64
 	TS    int64

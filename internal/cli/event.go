@@ -26,7 +26,10 @@ func newEventCmd() *cobra.Command {
 		Short: "Append a generic event (used by hooks)",
 		Long: `Append a generic event to the log. Used by Claude Code hooks
 (Stop, PostToolUse) for automated capture. Supported types:
-  task.new, task.done, task.update, scope.shift, scope.expand`,
+  task.new, task.done, task.update, scope.shift, scope.expand, note
+
+task.new is for work that still has to be done. note is for something that
+already happened; notes have no status and never reach the board.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !event.ValidType(typ) {
 				return fmt.Errorf("invalid --type: %q", typ)

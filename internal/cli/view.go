@@ -1,9 +1,9 @@
 package cli
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Ryong256/kanban/internal/db"
 	"github.com/Ryong256/kanban/internal/tui"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 

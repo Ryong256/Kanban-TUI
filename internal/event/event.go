@@ -14,11 +14,14 @@ const (
 	TaskUpdate  Type = "task.update"
 	ScopeShift  Type = "scope.shift"
 	ScopeExpand Type = "scope.expand"
+	// Note records something that already happened. It has no status and never
+	// enters the board, so it cannot rot in backlog the way a task can.
+	Note Type = "note"
 )
 
 func ValidType(t string) bool {
 	switch Type(t) {
-	case TaskNew, TaskDone, TaskUpdate, ScopeShift, ScopeExpand:
+	case TaskNew, TaskDone, TaskUpdate, ScopeShift, ScopeExpand, Note:
 		return true
 	}
 	return false
