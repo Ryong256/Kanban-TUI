@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -11,17 +12,26 @@ import (
 // appears when the list is truncated.
 const doneLimit = 15
 
-// badgePalette is a fixed set of ANSI-256 colors that are visually distinct
-// and read well on dark terminal backgrounds.
+// doneWindow bounds the DONE column to recent work. An all-time done column is
+// a log: it fills a quarter of the screen with rows that inform no decision.
+const doneWindow = 7 * 24 * time.Hour
+
+// badgePalette is a fixed set of ANSI-256 colors that are visually distinct and
+// read well on dark backgrounds.
+//
+// Deliberately mid-tone, not bright. These colors encode identity — which
+// project a row belongs to — which is the lowest-priority thing on the board.
+// Bright hues here compete with the alarm and focus colors, and when eight
+// saturated bars run down a column nothing stands out at all.
 var badgePalette = []lipgloss.Color{
-	"81",  // sky blue
-	"214", // orange
-	"141", // light purple
-	"84",  // mint green
-	"204", // salmon pink
-	"87",  // aqua
-	"222", // light gold
-	"210", // coral
+	"67",  // steel blue
+	"173", // muted orange
+	"139", // dusty purple
+	"108", // sage
+	"168", // muted rose
+	"73",  // teal
+	"179", // tan
+	"96",  // plum
 }
 
 // badgeColor returns a deterministic lipgloss color for a project name by

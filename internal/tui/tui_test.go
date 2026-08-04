@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/Ryong256/kanban/internal/event"
@@ -182,4 +183,9 @@ func TestTabsLoaded_empty_initialProject_stays_all(t *testing.T) {
 	if m.activeTab != 0 {
 		t.Fatalf("expected activeTab=0, got %d", m.activeTab)
 	}
+}
+
+// nullString wraps a string as a valid sql.NullString for view tests.
+func nullString(s string) sql.NullString {
+	return sql.NullString{String: s, Valid: true}
 }

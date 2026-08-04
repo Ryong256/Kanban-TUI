@@ -35,15 +35,20 @@ func TestViewBoard_badges_on_all_tab(t *testing.T) {
 
 	rendered := m.View()
 
-	// Strip ANSI and look for badge abbreviations.
-	// badgeAbbrev("kanban") = "kanban"
-	// badgeAbbrev("laya-recruiting-poc") = "laya-"
-	// badgeAbbrev("infra") = "infra"
+	// Projects are marked with a one-character colored accent bar rather than a
+	// truncated "[laya-]" tag: the tag cost 8 columns per row and could not
+	// tell laya-recruiting-poc from LAYA-IA-SDK.
 	plainText := stripANSI(rendered)
-	for _, badge := range []string{"[kanban]", "[laya-]", "[infra]", "[openc"} {
-		if !strings.Contains(plainText, badge) {
-			t.Errorf("expected badge %q in All-tab rendered output; got:\n%s", badge, plainText)
-		}
+	if !strings.Contains(plainText, "▌") {
+		t.Errorf("expected project accent bars in All-tab output; got:\n%s", plainText)
+	}
+	if strings.Contains(plainText, "[kanban]") || strings.Contains(plainText, "[laya-]") {
+		t.Errorf("expected no bracketed project tags any more; got:\n%s", plainText)
+	}
+
+	// Distinct projects must not collapse to the same accent color.
+	if badgeColor("laya-recruiting-poc") == badgeColor("LAYA-IA-SDK") {
+		t.Error("laya-recruiting-poc and LAYA-IA-SDK share an accent color")
 	}
 }
 
@@ -65,19 +70,21 @@ func TestViewBoard_no_badges_on_project_tab(t *testing.T) {
 	rendered := m.View()
 	plain := stripANSI(rendered)
 
-	// No badge brackets should appear in task rows.
-	if strings.Contains(plain, "[kanban]") {
-		t.Errorf("expected no project badge on specific project tab, but found [kanban] in:\n%s", plain)
+	// No accent bar should appear in task rows: on a single-project tab it
+	// would encode nothing and only cost width.
+	if strings.Contains(plain, "▌") {
+		t.Errorf("expected no project accent on a specific project tab; got:\n%s", plain)
 	}
 }
 
-// TestViewBoard_done_cap_footer verifies that when doneTotal > len(done tasks),
-// a "+N older" footer line appears in the done column.
-func TestViewBoard_done_cap_footer(t *testing.T) {
+// TestViewBoard_done_window verifies the done column reports the windowed count
+// and says how much older work sits outside the window.
+func TestViewBoard_done_window(t *testing.T) {
 	m := newTestModel()
 	m.width = 120
 	m.height = 30
 	m.activeTab = 0
+	m.colIdx = 3 // focus DONE so the header has room for the full form
 
 	doneTasks := make([]event.OpenTask, doneLimit)
 	for i := range doneTasks {
@@ -88,19 +95,23 @@ func TestViewBoard_done_cap_footer(t *testing.T) {
 	m.board = boardWith(map[string][]event.OpenTask{
 		event.StatusDone: doneTasks,
 	})
-	m.doneTotal = 109 // simulates 109 real done tasks; board has 15
+	m.doneTotal = 109   // 109 done all-time
+	m.doneInWindow = 15 // 15 of them this week
 
 	rendered := m.View()
 	plain := stripANSI(rendered)
 
-	// Must show true total in header.
-	if !strings.Contains(plain, "DONE (109)") {
-		t.Errorf("expected 'DONE (109)' header in rendered output; plain:\n%s", plain)
+	// The column reports the window, not the all-time log.
+	if !strings.Contains(plain, "DONE 15 this week") {
+		t.Errorf("expected 'DONE 15 this week' header; plain:\n%s", plain)
+	}
+	if strings.Contains(plain, "DONE (109)") {
+		t.Errorf("all-time done count must not be the column headline; plain:\n%s", plain)
 	}
 
-	// Must show "+N older" footer.
-	if !strings.Contains(plain, "+94 older") {
-		t.Errorf("expected '+94 older' footer in rendered output; plain:\n%s", plain)
+	// Work outside the window is stated as such, in the header.
+	if !strings.Contains(plain, "94 older") {
+		t.Errorf("expected '94 older' in the done header; plain:\n%s", plain)
 	}
 }
 
@@ -163,6 +174,7 @@ func TestViewBoard_width_fit(t *testing.T) {
 		event.StatusDone:    doneTasks,
 	})
 	m.doneTotal = 109
+	m.doneInWindow = 15
 
 	rendered := m.View()
 
@@ -177,14 +189,8 @@ func TestViewBoard_width_fit(t *testing.T) {
 
 	plain := stripANSI(rendered)
 
-	// Done total header.
-	if !strings.Contains(plain, "DONE (109)") {
-		t.Errorf("expected 'DONE (109)' in rendered output")
-	}
-
-	// "+N older" footer.
-	if !strings.Contains(plain, "+94 older") {
-		t.Errorf("expected '+94 older' footer in rendered output")
+	if !strings.Contains(plain, "DONE") {
+		t.Errorf("expected the DONE column header in rendered output")
 	}
 
 	// TESTING column still visible (it is empty in this scenario).

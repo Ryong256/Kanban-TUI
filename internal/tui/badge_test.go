@@ -76,100 +76,57 @@ func TestProjectBadge_contains_abbrev(t *testing.T) {
 	}
 }
 
-// --- computeColWidths ---
+// --- computeFocusWidths ---
 
-func TestComputeColWidths_all_nonempty(t *testing.T) {
-	widths := computeColWidths(100, 5, 10, make([]bool, 5), []int{10, 10, 10, 10, 10})
-	total := 0
-	for _, w := range widths {
-		total += w
-	}
-	if total != 100 {
-		t.Fatalf("expected total width 100, got %d", total)
-	}
-}
-
-func TestComputeColWidths_one_empty_redistributes(t *testing.T) {
-	// 5 columns, 100 total. Column 2 (testing) empty with header width 10.
-	// Collapsed: 10 freed. Remaining 90 split among 4 non-empty columns.
-	emptyMask := []bool{false, false, true, false, false}
-	headerWidths := []int{12, 14, 10, 14, 8}
-	widths := computeColWidths(100, 5, 1, emptyMask, headerWidths)
-
-	total := 0
-	for _, w := range widths {
-		total += w
-	}
-	if total != 100 {
-		t.Fatalf("expected total width 100, got %d (widths=%v)", total, widths)
-	}
-	// Collapsed column must equal its header width.
-	if widths[2] != 10 {
-		t.Fatalf("expected collapsed column width=10, got %d", widths[2])
-	}
-	// Non-empty columns must be >= min (1).
-	for i, empty := range emptyMask {
-		if !empty && widths[i] < 1 {
-			t.Errorf("non-empty column %d has width %d < 1", i, widths[i])
+func TestComputeFocusWidths_focus_gets_the_room(t *testing.T) {
+	widths := computeFocusWidths(200, 4, 1, 12)
+	for i, w := range widths {
+		if i == 1 {
+			continue
+		}
+		if widths[1] <= w {
+			t.Errorf("focused column (%d) is not wider than column %d (%d)", widths[1], i, w)
 		}
 	}
 }
 
-func TestComputeColWidths_all_empty(t *testing.T) {
-	emptyMask := []bool{true, true, true, true, true}
-	headerWidths := []int{8, 8, 8, 8, 8}
-	// All empty: even split
-	widths := computeColWidths(100, 5, 1, emptyMask, headerWidths)
-	total := 0
-	for _, w := range widths {
-		total += w
-	}
-	if total != 100 {
-		t.Fatalf("expected total width 100, got %d", total)
-	}
-}
-
-func TestComputeColWidths_width_sum_exact(t *testing.T) {
-	// Width is not divisible by numCols — remainder must end up somewhere.
-	emptyMask := []bool{false, true, false, false, false}
-	headerWidths := []int{10, 9, 10, 10, 10}
-	widths := computeColWidths(97, 5, 1, emptyMask, headerWidths)
-	total := 0
-	for _, w := range widths {
-		total += w
-	}
-	if total != 97 {
-		t.Fatalf("expected total width 97, got %d (widths=%v)", total, widths)
-	}
-}
-
-func TestComputeColWidths_narrow_terminal_never_overflows(t *testing.T) {
-	// Regression: minWidth used to clamp base upward, making widths sum past
-	// totalWidth on terminals narrower than numCols*minWidth (e.g. tmux panes).
-	cases := []struct {
-		name       string
-		totalWidth int
-		emptyMask  []bool
-	}{
-		{"all nonempty width 40", 40, []bool{false, false, false, false, false}},
-		{"all nonempty width 60", 60, []bool{false, false, false, false, false}},
-		{"wide collapsed headers squeeze content", 76, []bool{true, true, true, true, false}},
-		{"one nonempty narrow", 30, []bool{true, false, true, true, true}},
-	}
-	headerWidths := []int{12, 16, 12, 13, 18}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			widths := computeColWidths(tc.totalWidth, 5, 15, tc.emptyMask, headerWidths)
-			total := 0
+func TestComputeFocusWidths_never_exceeds_total(t *testing.T) {
+	cases := []int{20, 40, 76, 100, 137, 200, 400}
+	for _, total := range cases {
+		for focus := 0; focus < 4; focus++ {
+			widths := computeFocusWidths(total, 4, focus, 12)
+			sum := 0
 			for i, w := range widths {
 				if w < 1 {
-					t.Errorf("column %d has width %d < 1 (widths=%v)", i, w, widths)
+					t.Errorf("total=%d focus=%d: column %d has width %d", total, focus, i, w)
 				}
-				total += w
+				sum += w
 			}
-			if total > tc.totalWidth {
-				t.Fatalf("widths sum %d exceeds totalWidth %d (widths=%v)", total, tc.totalWidth, widths)
+			if sum > total {
+				t.Errorf("total=%d focus=%d: widths sum %d exceeds it (%v)", total, focus, sum, widths)
 			}
-		})
+		}
+	}
+}
+
+// On a terminal too narrow to give focus half the room, an even split is the
+// honest layout — the other columns must not be crushed below the floor.
+func TestComputeFocusWidths_narrow_terminal_degrades_evenly(t *testing.T) {
+	widths := computeFocusWidths(52, 4, 0, 12)
+	for i, w := range widths {
+		if w < 12 {
+			t.Errorf("column %d width %d fell below the floor (%v)", i, w, widths)
+		}
+	}
+}
+
+func TestComputeFocusWidths_out_of_range_focus_is_safe(t *testing.T) {
+	widths := computeFocusWidths(100, 4, 99, 12)
+	sum := 0
+	for _, w := range widths {
+		sum += w
+	}
+	if sum > 100 {
+		t.Errorf("widths sum %d exceeds 100 (%v)", sum, widths)
 	}
 }

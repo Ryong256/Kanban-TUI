@@ -45,7 +45,7 @@ func TestNote_never_reaches_task_surfaces(t *testing.T) {
 		t.Errorf("CountOpen = %d, want 1", n)
 	}
 
-	board, err := event.ListByStatus(d, "proj", 0)
+	board, err := event.ListByStatus(d, "proj", 0, 0)
 	if err != nil {
 		t.Fatalf("ListByStatus: %v", err)
 	}

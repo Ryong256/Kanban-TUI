@@ -48,12 +48,23 @@ kb move <id> <status>       move task between columns (backlog, in_progress, tes
 kb event --type=... ...     generic event (used by hooks)
 kb count                    print open count (waybar)
 kb scope <name>             timeline for a scope
-kb project add|list|rm      manage project registry
+kb project add|list|rm      manage project registry (rm --purge deletes its events)
 ```
 
 ## TUI
 
-Run `kb view` (alias `kb v`) to open the Bubbletea kanban board. Project tabs at the bottom, vim-style navigation (`h/j/k/l`), `1-5` to jump columns, `H/L` to move the selected task. Use `-a` to view tasks across all projects, `-p <name>` to scope to a specific project.
+Run `kb view` (alias `kb v`) to open the Bubbletea kanban board. Project tabs at
+the bottom, vim-style navigation (`h/j/k/l`), `1-4` to send the selected task to
+a column, `H/L` to move it one column over. Press `?` for the full keymap, `/` to
+filter, `d` to delete a task, `n` to turn it into a note, `D` to delete the
+active project. Use `-a` to view tasks across all projects, `-p <name>` to scope
+to a specific project.
+
+The focused column takes about half the width so its titles stay readable, and
+the rest render as a preview. `IN PROGRESS` and `TESTING` carry WIP limits and
+turn red when breached; tasks in them show how long they have sat there. `DONE`
+shows the last 7 days — the all-time count lives in the header as `N older`.
+A `~` marks a task whose scope has `scope.shift`/`scope.expand` events.
 
 ## Storage
 

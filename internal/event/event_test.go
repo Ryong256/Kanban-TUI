@@ -10,7 +10,7 @@ import (
 
 func TestListByStatus_empty(t *testing.T) {
 	d := db.OpenTest(t)
-	result, err := event.ListByStatus(d, "proj", 0)
+	result, err := event.ListByStatus(d, "proj", 0, 0)
 	if err != nil {
 		t.Fatalf("ListByStatus: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestListByStatus_groups_correctly(t *testing.T) {
 		t.Fatalf("MoveTask: %v", err)
 	}
 
-	result, err := event.ListByStatus(d, "proj", 0)
+	result, err := event.ListByStatus(d, "proj", 0, 0)
 	if err != nil {
 		t.Fatalf("ListByStatus: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestMoveTask_to_done_inserts_task_done_event(t *testing.T) {
 	}
 
 	// v_task_latest must show status=done
-	result, err := event.ListByStatus(d, "proj", 0)
+	result, err := event.ListByStatus(d, "proj", 0, 0)
 	if err != nil {
 		t.Fatalf("ListByStatus: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestDoneStatusMigration_phantom_task(t *testing.T) {
 		t.Fatalf("insert task.done: %v", err)
 	}
 
-	result, err := event.ListByStatus(d, "proj", 0)
+	result, err := event.ListByStatus(d, "proj", 0, 0)
 	if err != nil {
 		t.Fatalf("ListByStatus: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestMarkDone(t *testing.T) {
 		t.Fatalf("MarkDone: %v", err)
 	}
 
-	result, _ := event.ListByStatus(d, "proj", 0)
+	result, _ := event.ListByStatus(d, "proj", 0, 0)
 	if len(result.Board[event.StatusDone]) != 1 {
 		t.Fatalf("expected task in done after MarkDone, got %d", len(result.Board[event.StatusDone]))
 	}
@@ -231,7 +231,7 @@ func TestListByStatus_done_cap(t *testing.T) {
 		}
 	}
 
-	result, err := event.ListByStatus(d, "proj", limit)
+	result, err := event.ListByStatus(d, "proj", limit, 0)
 	if err != nil {
 		t.Fatalf("ListByStatus: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"database/sql"
 
 	"github.com/Ryong256/kanban/internal/db"
+	"github.com/Ryong256/kanban/internal/event"
 	"github.com/Ryong256/kanban/internal/project"
 	"github.com/spf13/cobra"
 )
@@ -231,24 +232,46 @@ func newProjectListCmd() *cobra.Command {
 }
 
 func newProjectRmCmd() *cobra.Command {
-	return &cobra.Command{
+	var purge bool
+	cmd := &cobra.Command{
 		Use:     "rm <name>",
 		Aliases: []string{"remove"},
-		Short:   "Unregister a project",
-		Args:    cobra.ExactArgs(1),
+		Short:   "Unregister a project (--purge also deletes its events)",
+		Long: `Unregister a project.
+
+By default only the registry row goes: the project's tasks, notes and history
+stay in the log and keep showing up on the board. Pass --purge to delete the
+events too — that cannot be undone.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
 			d, err := db.Open()
 			if err != nil {
 				return err
 			}
 			defer d.Close()
-			if err := project.Remove(d, args[0]); err != nil {
+
+			if purge {
+				n, err := event.DeleteProjectEvents(d, name)
+				if err != nil {
+					return err
+				}
+				// Unregistering may fail because the project was never in the
+				// registry; the events were the point, so that is not an error.
+				_ = project.Remove(d, name)
+				fmt.Printf("deleted project %q and %d events\n", name, n)
+				return nil
+			}
+
+			if err := project.Remove(d, name); err != nil {
 				return err
 			}
-			fmt.Printf("removed project %q\n", args[0])
+			fmt.Printf("unregistered project %q (events kept — use --purge to delete them)\n", name)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&purge, "purge", false, "also delete all events belonging to the project")
+	return cmd
 }
 
 // newDetectProjectCmd adds the `kb detect-project [path]` subcommand.

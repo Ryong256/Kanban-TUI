@@ -4,9 +4,9 @@ import (
 	"database/sql"
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Ryong256/kanban/internal/event"
 	"github.com/Ryong256/kanban/internal/project"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type Screen int
@@ -15,6 +15,9 @@ const (
 	ScreenBoard Screen = iota
 	ScreenAddTask
 	ScreenDetail
+	ScreenConfirmDelete
+	ScreenConfirmDeleteProject
+	ScreenHelp
 )
 
 // columns maps to event.AllStatuses() indices.
@@ -25,15 +28,18 @@ type Model struct {
 
 	// Tab state
 	tabs           []string // "All" + registered project names
+	tabCounts      map[string]int
 	activeTab      int
 	initialProject string // project to select on first tab load
 
 	// Board state
-	screen    Screen
-	board     map[string][]event.OpenTask // status → tasks (done capped at doneLimit)
-	doneTotal int                         // true total done tasks (for column header)
-	colIdx    int                         // active column index (0-3)
-	rowIdx    []int                       // cursor row per column
+	screen       Screen
+	board        map[string][]event.OpenTask // status → tasks (done capped at doneLimit)
+	doneTotal    int                         // all-time done count
+	doneInWindow int                         // done inside doneWindow — what the column shows
+	colIdx       int                         // active column index (0-3)
+	rowIdx       []int                       // cursor row per column
+	scrollIdx    []int                       // first visible row per column
 
 	// Add task state
 	input      string
@@ -42,6 +48,22 @@ type Model struct {
 	// Detail view state
 	detailTask     *event.OpenTask
 	detailTimeline []event.TimelineEntry
+	detailScroll   int
+
+	// Delete confirmation state
+	deleteTarget       *event.OpenTask
+	deleteProject      string
+	deleteProjectCount int
+
+	// Incremental filter over task titles and scopes.
+	filter    string
+	filtering bool
+
+	// Screen to return to when a modal closes.
+	prevScreen Screen
+
+	// Transient one-line feedback shown in the footer (e.g. "deleted #12").
+	flash string
 
 	// Cursor follows the task across moves: set when a move is dispatched,
 	// applied (and cleared) on the next boardLoadedMsg.
@@ -59,7 +81,9 @@ func NewModel(db *sql.DB, initialProject string) *Model {
 		screen:         ScreenBoard,
 		board:          make(map[string][]event.OpenTask),
 		rowIdx:         make([]int, len(columns)),
+		scrollIdx:      make([]int, len(columns)),
 		tabs:           []string{"All"},
+		tabCounts:      make(map[string]int),
 		initialProject: initialProject,
 	}
 	return m
@@ -85,18 +109,60 @@ func (m *Model) loadTabs() tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return tabsLoadedMsg{names}
+		// Counts are best-effort: a failure here must not cost the user the
+		// tab bar itself.
+		counts, err := event.CountOpenByProject(m.db)
+		if err != nil {
+			counts = map[string]int{}
+		}
+		return tabsLoadedMsg{names: names, counts: counts}
+	}
+}
+
+func (m *Model) deleteTaskCmd(taskID int64) tea.Cmd {
+	return func() tea.Msg {
+		if err := event.DeleteTask(m.db, taskID); err != nil {
+			return errMsg{err}
+		}
+		return taskDeletedMsg{taskID: taskID}
+	}
+}
+
+func (m *Model) demoteTaskCmd(taskID int64) tea.Cmd {
+	return func() tea.Msg {
+		if err := event.ConvertTaskToNote(m.db, taskID); err != nil {
+			return errMsg{err}
+		}
+		return taskDemotedMsg{taskID: taskID}
 	}
 }
 
 func (m *Model) loadBoard() tea.Cmd {
 	return func() tea.Msg {
 		proj := m.activeProject()
-		result, err := event.ListByStatus(m.db, proj, doneLimit)
+		result, err := event.ListByStatus(m.db, proj, doneLimit, doneWindow)
 		if err != nil {
 			return errMsg{err}
 		}
-		return boardLoadedMsg{board: result.Board, doneTotal: result.DoneTotal}
+		return boardLoadedMsg{
+			board:        result.Board,
+			doneTotal:    result.DoneTotal,
+			doneInWindow: result.DoneInWindow,
+		}
+	}
+}
+
+func (m *Model) deleteProjectCmd(name string, purge bool) tea.Cmd {
+	return func() tea.Msg {
+		if purge {
+			if _, err := event.DeleteProjectEvents(m.db, name); err != nil {
+				return errMsg{err}
+			}
+		}
+		// Unregistering a project that was never in the registry is not an
+		// error worth surfacing — the events are what the user came for.
+		_ = project.Remove(m.db, name)
+		return projectDeletedMsg{name: name, purged: purge}
 	}
 }
 
@@ -111,12 +177,27 @@ func (m *Model) loadDetail(task event.OpenTask) tea.Cmd {
 }
 
 type tabsLoadedMsg struct {
-	names []string
+	names  []string
+	counts map[string]int
+}
+
+type taskDeletedMsg struct {
+	taskID int64
+}
+
+type taskDemotedMsg struct {
+	taskID int64
 }
 
 type boardLoadedMsg struct {
-	board     map[string][]event.OpenTask
-	doneTotal int
+	board        map[string][]event.OpenTask
+	doneTotal    int
+	doneInWindow int
+}
+
+type projectDeletedMsg struct {
+	name   string
+	purged bool
 }
 
 type taskMovedMsg struct {
