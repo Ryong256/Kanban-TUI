@@ -1,6 +1,6 @@
 # kb — personal kanban
 
-Event-sourced personal kanban that captures tasks and scope evolution from your Claude Code sessions automatically.
+Event-sourced personal kanban with optional automation adapters for Claude Code and OpenCode.
 
 ## Why
 
@@ -32,6 +32,66 @@ kb init
 ```
 
 Requires Go 1.26+. Binary lands in `$GOBIN` (usually `~/go/bin` or `~/.local/bin` if you set `GOBIN`).
+
+## Architecture
+
+`kb` core is host-neutral. The CLI, event store, project detection, and TUI do
+not depend on an AI host. Automation lives at the host boundary and invokes the
+same public CLI commands a person can run.
+
+| Layer | Responsibility |
+| ----- | -------------- |
+| `kb` core | Project-scoped tasks, notes, events, storage, and TUI |
+| Claude Code adapter | Existing `PostToolUse` passive capture and `Stop` audit lifecycle |
+| OpenCode adapter | System guidance, idle audit turn, and Engram memory mirroring |
+
+The adapters are independent. Installing OpenCode support does not remove or
+modify Claude Code behavior, and the OpenCode adapter does not modify the
+Engram plugin.
+
+## Automation adapters
+
+### Claude Code
+
+Existing Claude Code hooks remain compatible. `PostToolUse` mirrors supported
+Engram `mem_save` calls into `kb`, while `Stop` asks the agent to audit tasks and
+scope before ending. Claude Code owns that hook lifecycle and configuration;
+the OpenCode installer below does not touch it.
+
+### OpenCode
+
+The repository-owned plugin source is
+[`integrations/opencode/kanban.ts`](integrations/opencode/kanban.ts). Install it
+for the current user with:
+
+```sh
+make install-opencode
+```
+
+The target copies the plugin to
+`${XDG_CONFIG_HOME:-$HOME/.config}/opencode/plugins/kanban.ts`, creating only
+the plugin directory it needs. OpenCode 1.18.16 discovers TypeScript files in
+that directory automatically, so no `opencode.json` edit is required.
+
+Quit and restart OpenCode after installation. Plugins are loaded at startup and
+an already-running process will not see the new file.
+
+OpenCode has a different lifecycle from Claude Code:
+
+- Every top-level system transform receives current project-scoped open tasks
+  and the task-versus-note procedure, including after later turns or compaction.
+- The first top-level `session.idle` refreshes tasks and dispatches one synthetic
+  audit turn. Child sessions are ignored and a failed dispatch may retry on the
+  next idle event.
+- Successful `engram_mem_save` calls for bug fixes, decisions, architecture,
+  discoveries, patterns, and configuration are mirrored as `kb note` entries.
+  Prompt saves, preferences, and unknown types are not mirrored.
+- Project detection is explicit. If `kb detect-project` returns no project, the
+  adapter stops and never runs an unscoped `kb list`.
+
+Set `KB_HOOKS_DISABLED=1` before starting OpenCode to disable the adapter. A
+missing `kb` binary, failed project detection, or adapter subprocess error is a
+best-effort no-op and does not interrupt OpenCode.
 
 ## Commands
 
@@ -69,13 +129,6 @@ A `~` marks a task whose scope has `scope.shift`/`scope.expand` events.
 ## Storage
 
 `~/.local/share/kanban/db.sqlite` — SQLite, append-only events table with materialized views for current state.
-
-## Capture
-
-Two layers:
-
-1. **Passive** — `PostToolUse` hook on engram `mem_save` mirrors saves into events.
-2. **Active** — `Stop` hook returns a system reminder forcing the agent to audit for unsaved tasks/scope shifts at every stop.
 
 ## License
 
