@@ -19,6 +19,8 @@ describe("Threat matrix: doc-like paths", () => {
       "integrations/opencode/kanban.ts",
       "integrations/claude/kanban.sh",
       "integrations/claude/stop-hook.sh",
+      "integrations/claude/session-start.sh",
+      "integrations/claude/posttool-memsave.sh",
     ])
     for (const line of installLines) {
       const match = line.match(/integrations\/[^/]+\/[\w.-]+/)

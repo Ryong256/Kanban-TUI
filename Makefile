@@ -32,6 +32,8 @@ install-claude: install
 	install -d "$(HOME)/.claude/hooks"
 	install -m 0755 "$(CURDIR)/integrations/claude/kanban.sh" "$(HOME)/.claude/hooks/kanban.sh"
 	install -m 0755 "$(CURDIR)/integrations/claude/stop-hook.sh" "$(HOME)/.claude/hooks/kanban-reconcile-stop.sh"
+	install -m 0755 "$(CURDIR)/integrations/claude/session-start.sh" "$(HOME)/.claude/hooks/kanban-session-start.sh"
+	install -m 0755 "$(CURDIR)/integrations/claude/posttool-memsave.sh" "$(HOME)/.claude/hooks/kanban-posttool-memsave.sh"
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
