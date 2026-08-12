@@ -1,7 +1,10 @@
 package event
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -29,6 +32,48 @@ type OpenTask struct {
 	// events. Scope events carry no ref_id — they attach to (project, scope) —
 	// so this is the only honest way to surface them next to a task.
 	ScopeMoved bool
+
+	// Flag is an advisory marker carried by the newest task.update that set one,
+	// currently only FlagCompletionUnverified. It is deliberately not a status:
+	// a task whose status left the enum disappears from the board, and a
+	// completion that could not be proved must stay visible, not vanish.
+	Flag string
+}
+
+// FlagCompletionUnverified marks a task whose completion was claimed but whose
+// evidence did not validate. The task stays open in its own column.
+const FlagCompletionUnverified = "completion-unverified"
+
+// flagMetaSelect resolves the newest task.update carrying metadata. Reading the
+// newest one — rather than the newest *flagged* one — is what lets a later
+// successful attempt clear an earlier flag.
+const flagMetaSelect = `
+               COALESCE((SELECT u.meta_json FROM events u
+                         WHERE u.ref_id = t.id AND u.type = 'task.update'
+                           AND u.meta_json IS NOT NULL AND u.meta_json != ''
+                         ORDER BY u.ts DESC, u.id DESC LIMIT 1), '')`
+
+// flagFrom extracts the advisory flag from an event's meta_json.
+func flagFrom(metaJSON string) string {
+	_, flag := evidenceFrom(metaJSON)
+	return flag
+}
+
+// evidenceFrom extracts the recorded evidence value and advisory flag from an
+// event's meta_json. Unparseable metadata yields empty values, never an error:
+// the board must render even when an old or hand-edited row is malformed.
+func evidenceFrom(metaJSON string) (value, flag string) {
+	if metaJSON == "" {
+		return "", ""
+	}
+	var m struct {
+		Value string `json:"value"`
+		Flag  string `json:"flag"`
+	}
+	if err := json.Unmarshal([]byte(metaJSON), &m); err != nil {
+		return "", ""
+	}
+	return m.Value, m.Flag
 }
 
 // taskSelect is shared by the board queries. status_since only considers
@@ -40,7 +85,8 @@ const taskSelect = `
                          WHERE e.id = t.id OR e.ref_id = t.id), t.created_ts) AS last_ts,
                COALESCE((SELECT MAX(u.ts) FROM events u
                          WHERE u.ref_id = t.id AND u.type = 'task.update'
-                           AND u.status IS NOT NULL), t.created_ts) AS status_since
+                           AND u.status IS NOT NULL), t.created_ts) AS status_since,
+` + flagMetaSelect + ` AS flag_meta
         FROM   v_task_latest t
 `
 
@@ -49,10 +95,12 @@ func scanTasks(rows *sql.Rows) ([]OpenTask, error) {
 	var out []OpenTask
 	for rows.Next() {
 		var t OpenTask
+		var flagMeta string
 		if err := rows.Scan(&t.ID, &t.TS, &t.Project, &t.Scope, &t.Title, &t.Body,
-			&t.Status, &t.LastTS, &t.StatusSince); err != nil {
+			&t.Status, &t.LastTS, &t.StatusSince, &flagMeta); err != nil {
 			return nil, err
 		}
+		t.Flag = flagFrom(flagMeta)
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -551,4 +599,252 @@ func TaskTimeline(d *sql.DB, taskID int64) ([]TimelineEntry, error) {
 // MarkDone is kept for backward compat with CLI `kb done <id>`.
 func MarkDone(d *sql.DB, refID int64) (int64, error) {
 	return MoveTask(d, refID, StatusDone, "manual")
+}
+
+// ReconcileTask is the row shape used by the reconcile service.
+type ReconcileTask struct {
+	ID            int64
+	Project       string
+	Scope         string
+	Title         string
+	Status        string
+	LastTS        int64
+	SessionID     string
+	EvidenceValue string
+	Flag          string
+}
+
+// TaskMeta is the schema-v1 metadata stored on task.new events.
+type TaskMeta struct {
+	SchemaVersion    int    `json:"schema_version"`
+	ClosureCondition string `json:"closure_condition"`
+	EvidenceType     string `json:"evidence_type"`
+}
+
+// ReadTaskMeta reads schema-v1 metadata from the original task.new event.
+func ReadTaskMeta(d *sql.DB, taskID int64) (TaskMeta, error) {
+	var raw string
+	var meta TaskMeta
+	err := d.QueryRow(`SELECT COALESCE(meta_json, '') FROM events WHERE id = ? AND type = 'task.new'`, taskID).Scan(&raw)
+	if err != nil {
+		return meta, err
+	}
+	if raw == "" {
+		return meta, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		return meta, err
+	}
+	return meta, nil
+}
+
+// ListBySession returns active tasks owned by sessionID in the project.
+// An empty sessionID owns nothing.
+func ListBySession(d *sql.DB, project, sessionID string) ([]ReconcileTask, error) {
+	if project == "" {
+		return nil, fmt.Errorf("project is required")
+	}
+	if sessionID == "" {
+		return []ReconcileTask{}, nil
+	}
+	rows, err := d.Query(`
+		SELECT t.id, t.project, COALESCE(t.scope, ''), t.title, t.status,
+		       COALESCE((SELECT MAX(e.ts) FROM events e WHERE e.id = t.id OR e.ref_id = t.id), t.created_ts),
+		       COALESCE(base.session_id, ''),
+		`+flagMetaSelect+`
+		FROM   v_task_latest t
+		JOIN   events base ON base.id = t.id
+		WHERE  t.project = ?
+		  AND  COALESCE(base.session_id, '') = ?
+		  AND  t.status != 'done'
+		ORDER BY t.id
+	`, project, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return scanReconcileTasks(rows)
+}
+
+// ListStale returns up to limit active tasks in the project with last update
+// older than the threshold computed from now and staleAfter (in seconds).
+func ListStale(d *sql.DB, project string, now, staleAfter int64, limit int) ([]ReconcileTask, error) {
+	if project == "" {
+		return nil, fmt.Errorf("project is required")
+	}
+	if staleAfter <= 0 {
+		staleAfter = 7 * 24 * 60 * 60
+	}
+	cutoff := now - staleAfter
+	if limit <= 0 {
+		limit = 50
+	}
+	// last_ts is computed once in the inner select and filtered/ordered by alias
+	// in the outer one; repeating the correlated subquery in WHERE and ORDER BY
+	// makes SQLite evaluate it three times per row.
+	rows, err := d.Query(`
+		SELECT id, project, scope, title, status, last_ts, session_id, flag_meta
+		FROM (
+			SELECT t.id AS id, t.project AS project, COALESCE(t.scope, '') AS scope,
+			       t.title AS title, t.status AS status,
+			       COALESCE((SELECT MAX(e.ts) FROM events e
+			                 WHERE e.id = t.id OR e.ref_id = t.id), t.created_ts) AS last_ts,
+			       COALESCE(base.session_id, '') AS session_id,
+			`+flagMetaSelect+` AS flag_meta
+			FROM   v_task_latest t
+			JOIN   events base ON base.id = t.id
+			WHERE  t.project = ?
+			  AND  t.status != 'done'
+		)
+		WHERE  last_ts < ?
+		ORDER BY last_ts ASC, id ASC
+		LIMIT ?
+	`, project, cutoff, limit)
+	if err != nil {
+		return nil, err
+	}
+	return scanReconcileTasks(rows)
+}
+
+func scanReconcileTasks(rows *sql.Rows) ([]ReconcileTask, error) {
+	defer rows.Close()
+	var out []ReconcileTask
+	for rows.Next() {
+		var r ReconcileTask
+		var flagMeta string
+		if err := rows.Scan(&r.ID, &r.Project, &r.Scope, &r.Title, &r.Status,
+			&r.LastTS, &r.SessionID, &flagMeta); err != nil {
+			return nil, err
+		}
+		r.EvidenceValue, r.Flag = evidenceFrom(flagMeta)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ApplyEvidence validates the supplied evidence using validate and appends the
+// lifecycle events atomically. Invalid evidence produces a single idempotent
+// task.update flagged completion-unverified.
+func ApplyEvidence(d *sql.DB, taskID int64, evidenceType, value, source string, validate func(string, string) error) (updateID, doneID int64, err error) {
+	tx, err := d.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+
+	var project, title string
+	var metaRaw string
+	if err := tx.QueryRow(`
+		SELECT project, title, COALESCE(meta_json, '')
+		FROM   events
+		WHERE  id = ? AND type = 'task.new'
+	`, taskID).Scan(&project, &title, &metaRaw); err != nil {
+		return 0, 0, fmt.Errorf("task #%d not found: %w", taskID, err)
+	}
+
+	// Determine the task's current status from the latest lifecycle view, not the
+	// creation row. The original task.new status never reflects later updates.
+	var status string
+	if err := tx.QueryRow(`SELECT status FROM v_task_latest WHERE id = ?`, taskID).Scan(&status); err != nil {
+		return 0, 0, fmt.Errorf("task #%d status lookup: %w", taskID, err)
+	}
+
+	// Repeated closure after the task is already done is a no-op.
+	if status == StatusDone {
+		return 0, 0, nil
+	}
+
+	var meta TaskMeta
+	_ = json.Unmarshal([]byte(metaRaw), &meta)
+
+	if source == "" {
+		source = "manual"
+	}
+
+	attemptHash := hashAttempt(value)
+
+	// Idempotency: if the latest update already records this exact attempt, do nothing.
+	var latestMetaRaw string
+	_ = tx.QueryRow(`
+		SELECT COALESCE(meta_json, '')
+		FROM   events
+		WHERE  type = 'task.update' AND ref_id = ?
+		ORDER  BY ts DESC, id DESC
+		LIMIT  1
+	`, taskID).Scan(&latestMetaRaw)
+	if hasSameAttemptHash(latestMetaRaw, attemptHash) {
+		return 0, 0, nil
+	}
+
+	valid := meta.EvidenceType == evidenceType && validate(evidenceType, value) == nil
+	targetStatus := status
+	metaJSON := ""
+
+	if valid {
+		if status == StatusBacklog {
+			targetStatus = StatusInProgress
+		}
+		metaJSON = evidenceMetaJSON(evidenceType, value, attemptHash, "")
+	} else {
+		// The task keeps its column. The unproved completion is recorded as a
+		// flag so it stays visible on the board instead of falling out of the
+		// status enum and disappearing from it.
+		metaJSON = evidenceMetaJSON(evidenceType, value, attemptHash, FlagCompletionUnverified)
+	}
+
+	res, err := tx.Exec(`
+		INSERT INTO events (ts, type, project, title, ref_id, source, status, meta_json)
+		VALUES (?, 'task.update', ?, ?, ?, ?, ?, ?)
+	`, time.Now().Unix(), project, title, taskID, source, targetStatus, metaJSON)
+	if err != nil {
+		return 0, 0, err
+	}
+	updateID, _ = res.LastInsertId()
+
+	if valid {
+		doneRes, err := tx.Exec(`
+			INSERT INTO events (ts, type, project, title, ref_id, source, status, meta_json)
+			VALUES (?, 'task.done', ?, ?, ?, ?, ?, ?)
+		`, time.Now().Unix(), project, title, taskID, source, StatusDone, metaJSON)
+		if err != nil {
+			return updateID, 0, err
+		}
+		doneID, _ = doneRes.LastInsertId()
+	}
+
+	return updateID, doneID, tx.Commit()
+}
+
+func evidenceMetaJSON(evidenceType, value, attemptHash, flag string) string {
+	m := map[string]any{
+		"schema_version": 1,
+		"evidence_type":  evidenceType,
+		"value":          value,
+		"attempt_hash":   attemptHash,
+	}
+	if flag != "" {
+		m["flag"] = flag
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func hashAttempt(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func hasSameAttemptHash(metaJSON, attemptHash string) bool {
+	if metaJSON == "" {
+		return false
+	}
+	var m struct {
+		AttemptHash string `json:"attempt_hash"`
+	}
+	if err := json.Unmarshal([]byte(metaJSON), &m); err != nil {
+		return false
+	}
+	return m.AttemptHash == attemptHash
 }
