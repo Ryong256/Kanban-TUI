@@ -1,0 +1,16 @@
+{
+  "name": "kanban-tui-integrations",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "bun test integrations",
+    "test:integrations": "bun test integrations"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

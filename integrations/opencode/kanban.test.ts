@@ -1,23 +1,32 @@
 import { describe, expect, test } from "bun:test"
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "fs"
+import { tmpdir } from "os"
+import { join } from "path"
 
 import Kanban from "./kanban"
 
-type Call = { args: readonly string[]; cwd: string }
+type Call = { args: readonly string[]; cwd: string; env?: Record<string, string> }
 
 function harness(options: {
   project?: string
   list?: string
   getSession?: (parameters: any) => Promise<any>
-  promptAsync?: (parameters: any) => Promise<any>
+  env?: Record<string, string>
+  reconcileError?: Error
 } = {}) {
   const calls: Call[] = []
-  const prompts: any[] = []
   const dependencies = {
-    hooksDisabled: () => false,
-    runKb: async (args, cwd) => {
-      calls.push({ args, cwd })
+    hooksDisabled: () => options.env?.KB_HOOKS_DISABLED === "1",
+    reconciling: () => options.env?.KB_RECONCILING === "1",
+    runKb: async (args: readonly string[], cwd: string) => {
+      const call: Call = { args, cwd }
+      calls.push(call)
       if (args[0] === "detect-project") return options.project ?? "kanban-tui"
       if (args[0] === "list") return options.list ?? "Aug 10  Fix adapter"
+      if (args[0] === "reconcile") {
+        if (options.reconcileError) throw options.reconcileError
+        return "{\"schema_version\":1}"
+      }
       return ""
     },
   }
@@ -27,14 +36,10 @@ function harness(options: {
     client: {
       session: {
         get: options.getSession ?? (async ({ sessionID }: any) => ({ data: { id: sessionID } })),
-        promptAsync: options.promptAsync ?? (async (parameters: any) => {
-          prompts.push(parameters)
-          return {}
-        }),
       },
     },
   }
-  return { calls, context, dependencies, prompts }
+  return { calls, context, dependencies }
 }
 
 async function plugin(harness: ReturnType<typeof harness>) {
@@ -52,9 +57,15 @@ async function created(hooks: any, id: string, parentID?: string) {
 
 describe("OpenCode kanban adapter", () => {
   test("disabled hooks do not invoke kb", async () => {
-    const h = harness()
-    h.dependencies.hooksDisabled = () => true
+    const h = harness({ env: { KB_HOOKS_DISABLED: "1" } })
+    const hooks = await plugin(h)
 
+    expect(Object.keys(hooks)).toHaveLength(0)
+    expect(h.calls).toHaveLength(0)
+  })
+
+  test("reconciling marker short-circuits to no hooks", async () => {
+    const h = harness({ env: { KB_RECONCILING: "1" } })
     const hooks = await plugin(h)
 
     expect(Object.keys(hooks)).toHaveLength(0)
@@ -82,85 +93,50 @@ describe("OpenCode kanban adapter", () => {
     expect(Object.keys(hooks)).toHaveLength(0)
   })
 
-  test("mirrors only the exact memory tool and six accepted types", async () => {
-    const h = harness()
-    const hooks: any = await plugin(h)
-    await created(hooks, "top")
-
-    const rejected = [
-      ["engram_mem_save_prompt", { type: "bugfix", title: "prompt" }],
-      ["engram_mem_save_extra", { type: "bugfix", title: "extra" }],
-      ["engram_mem_save", { type: "preference", title: "preference" }],
-      ["engram_mem_save", { type: "unknown", title: "unknown" }],
-      ["engram_mem_save", { type: "config", title: "   " }],
-    ]
-    for (const [tool, args] of rejected) {
-      await hooks["tool.execute.after"]({ tool, sessionID: "top", args }, {})
-    }
-    for (const type of ["bugfix", "decision", "architecture", "discovery", "pattern", "config"]) {
-      await hooks["tool.execute.after"]({
-        tool: "engram_mem_save",
-        sessionID: "top",
-        args: { type, title: `saved ${type}` },
-      }, {})
-    }
-
-    const notes = h.calls.filter((call) => call.args[0] === "note")
-    expect(notes).toHaveLength(6)
-    expect(notes.map((call) => call.args.at(-1))).toEqual([
-      "saved bugfix",
-      "saved decision",
-      "saved architecture",
-      "saved discovery",
-      "saved pattern",
-      "saved config",
-    ])
-  })
-
-  test("passes titles, scope, and body as literal argv values", async () => {
-    const h = harness()
-    const hooks: any = await plugin(h)
-    await created(hooks, "top")
-    const title = "$(touch /tmp/nope); 'quoted' && false"
-    const scope = "scope; rm -rf /"
-    const content = "line one\n$(uname)"
-
-    await hooks["tool.execute.after"]({
-      tool: "engram_mem_save",
-      sessionID: "top",
-      args: { type: "decision", title, topic_key: scope, content },
-    }, {})
-
-    expect(h.calls.at(-1)?.args).toEqual([
-      "note",
-      "--project",
-      "kanban-tui",
-      "--source",
-      "hook-post",
-      "--scope",
-      scope,
-      "--body",
-      content,
-      "--",
-      title,
-    ])
-  })
-
-  test("dispatches one top-level idle audit and prevents recursive loops", async () => {
+  test("invokes reconcile on top-level session idle", async () => {
     const h = harness()
     const hooks: any = await plugin(h)
     await created(hooks, "top")
 
     await hooks.event({ event: { type: "session.idle", properties: { sessionID: "top" } } })
-    await hooks.event({ event: { type: "session.idle", properties: { sessionID: "top" } } })
 
-    expect(h.prompts).toHaveLength(1)
-    expect(h.prompts[0].sessionID).toBe("top")
-    expect(h.prompts[0].parts[0].text).toContain("Do not run another audit turn")
-    expect(h.calls.filter((call) => call.args[0] === "list")).toHaveLength(1)
+    const reconciles = h.calls.filter((call) => call.args[0] === "reconcile")
+    expect(reconciles).toHaveLength(1)
+    expect(reconciles[0].args).toEqual([
+      "reconcile",
+      "--session-id",
+      "top",
+      "--json",
+    ])
   })
 
-  test("claims a top-level idle audit before concurrent handlers can dispatch", async () => {
+  test("reconcile argv values are literal", async () => {
+    const h = harness()
+    const hooks: any = await plugin(h)
+    await created(hooks, "ses; rm -rf /")
+
+    await hooks.event({
+      event: { type: "session.idle", properties: { sessionID: "ses; rm -rf /" } },
+    })
+
+    const reconciles = h.calls.filter((call) => call.args[0] === "reconcile")
+    expect(reconciles[0].args).toEqual([
+      "reconcile",
+      "--session-id",
+      "ses; rm -rf /",
+      "--json",
+    ])
+  })
+
+  test("failure in reconcile is isolated", async () => {
+    const h = harness({ reconcileError: new Error("kb offline") })
+    const hooks: any = await plugin(h)
+    await created(hooks, "top")
+
+    await expect(hooks.event({ event: { type: "session.idle", properties: { sessionID: "top" } } })).resolves.toBeUndefined()
+  })
+
+  test("concurrent idle events dispatch one reconcile", async () => {
     const h = harness()
     const hooks: any = await plugin(h)
     await created(hooks, "top")
@@ -168,96 +144,56 @@ describe("OpenCode kanban adapter", () => {
 
     await Promise.all([hooks.event(idle), hooks.event(idle)])
 
-    expect(h.prompts).toHaveLength(1)
-    expect(h.calls.filter((call) => call.args[0] === "list")).toHaveLength(1)
+    expect(h.calls.filter((call) => call.args[0] === "reconcile")).toHaveLength(1)
   })
 
-  test("ignores child sessions across system, idle, and tool hooks", async () => {
+  test("ignores child sessions", async () => {
     const h = harness()
     const hooks: any = await plugin(h)
     await created(hooks, "child", "parent")
-    const output = { system: ["original"] }
 
-    await hooks["experimental.chat.system.transform"]({ sessionID: "child" }, output)
     await hooks.event({ event: { type: "session.idle", properties: { sessionID: "child" } } })
-    await hooks["tool.execute.after"]({
-      tool: "engram_mem_save",
-      sessionID: "child",
-      args: { type: "bugfix", title: "child fact" },
-    }, {})
 
-    expect(output.system).toEqual(["original"])
-    expect(h.prompts).toHaveLength(0)
-    expect(h.calls.filter((call) => call.args[0] !== "detect-project")).toHaveLength(0)
+    expect(h.calls.filter((call) => call.args[0] === "reconcile")).toHaveLength(0)
   })
 
-  test("cleans lifecycle caches when a session is deleted", async () => {
-    const h = harness()
-    const hooks: any = await plugin(h)
-    await created(hooks, "reused")
-    await hooks.event({ event: { type: "session.idle", properties: { sessionID: "reused" } } })
-    await hooks.event({
-      event: { type: "session.deleted", properties: { info: { id: "reused" } } },
-    })
-    await created(hooks, "reused")
-    await hooks.event({ event: { type: "session.idle", properties: { sessionID: "reused" } } })
+  test("production spawn does not mark first reconcile and returns core output", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kb-spawn-"))
+    const log = join(tmp, "calls.log")
+    const kb = join(tmp, "kb")
+    writeFileSync(
+      kb,
+      `#!/usr/bin/env bash
+echo "$@" >> "${log}"
+[[ "$1" == "detect-project" ]] && { echo "proj"; exit; }
+[[ "$1" == "reconcile" ]] && { echo '{"schema_version":1,"project":"proj","session_id":"'"$3"'","session_owned":[],"stale_review":[],"errors":[]}'; exit; }
+echo "task"
+`,
+      { mode: 0o755 },
+    )
 
-    expect(h.prompts).toHaveLength(2)
-    expect(h.calls.filter((call) => call.args[0] === "list")).toHaveLength(2)
-  })
+    const oldPath = process.env.PATH
+    process.env.PATH = `${tmp}:${oldPath}`
+    try {
+      const context = {
+        directory: tmp,
+        worktree: tmp,
+        client: { session: { get: async ({ sessionID }: any) => ({ data: { id: sessionID } }) } },
+      }
+      const hooks: any = await Kanban(context as any, {
+        hooksDisabled: () => false,
+        reconciling: () => false,
+      } as any)
+      expect(typeof hooks.event).toBe("function")
+      await created(hooks, "top")
 
-  test("clears the idle marker only when dispatch fails so a later idle retries", async () => {
-    let attempts = 0
-    const h = harness({
-      promptAsync: async () => {
-        attempts++
-        if (attempts === 1) throw new Error("offline")
-        return {}
-      },
-    })
-    const hooks: any = await plugin(h)
-    await created(hooks, "top")
-
-    await hooks.event({ event: { type: "session.idle", properties: { sessionID: "top" } } })
-    await hooks.event({ event: { type: "session.idle", properties: { sessionID: "top" } } })
-    await hooks.event({ event: { type: "session.idle", properties: { sessionID: "top" } } })
-
-    expect(attempts).toBe(2)
-  })
-
-  test("preserves existing system content and refreshes durable guidance", async () => {
-    const h = harness({ list: "Aug 10  Verify integration" })
-    const hooks: any = await plugin(h)
-    await created(hooks, "top")
-    const output = { system: ["existing system content"] }
-
-    await hooks["experimental.chat.system.transform"]({ sessionID: "top" }, output)
-    await hooks["experimental.chat.system.transform"]({ sessionID: "top" }, output)
-
-    expect(output.system[0].startsWith("existing system content")).toBe(true)
-    expect(output.system[0]).toContain("Current open tasks for kanban-tui")
-    expect(output.system[0]).toContain("this is closed when ___")
-    expect(output.system[0]).toContain("completed, confirmed, or observed fact")
-    expect(output.system[0]).toContain("avoid duplicates")
-    expect(output.system[0]).toContain("Close completed tasks and move active tasks promptly")
-    expect(output.system[0]).toContain("Never put local kb task IDs in repository artifacts")
-    expect(output.system[0].match(/kb-opencode-guidance:start/g)).toHaveLength(1)
-  })
-
-  test("fetches resumed session metadata before deciding top-level status", async () => {
-    const fetched: any[] = []
-    const h = harness({
-      getSession: async (parameters) => {
-        fetched.push(parameters)
-        return { data: { id: parameters.sessionID } }
-      },
-    })
-    const hooks: any = await plugin(h)
-
-    await hooks.event({ event: { type: "session.idle", properties: { sessionID: "resumed" } } })
-
-    expect(fetched).toHaveLength(1)
-    expect(fetched[0].sessionID).toBe("resumed")
-    expect(h.prompts).toHaveLength(1)
+      const output = await hooks.event({ event: { type: "session.idle", properties: { sessionID: "top" } } })
+      expect(output).toContain('"schema_version":1')
+      expect(output).not.toContain('"no_op":true')
+      const calls = readFileSync(log, "utf-8").split("\n").filter((line) => line.startsWith("reconcile "))
+      expect(calls).toEqual(["reconcile --session-id top --json"])
+    } finally {
+      process.env.PATH = oldPath
+    }
   })
 })

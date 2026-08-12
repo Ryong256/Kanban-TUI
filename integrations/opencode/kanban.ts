@@ -20,8 +20,6 @@ const OPERATING_PROCEDURE = `## kb task and note procedure
 - Close completed tasks and move active tasks promptly so the board reflects reality.
 - Never put local kb task IDs in repository artifacts, including source, tests, documentation, commits, issues, or pull requests.`
 
-const AUDIT_PROMPT = `Run one concise kb audit for this session now. Review the current project tasks and the work just performed. Add only genuinely missing future work, using \`this is closed when ___\` as the completion condition. Record completed, confirmed, or observed facts as notes instead of tasks. Avoid duplicates, and close or move existing tasks promptly. Never put local kb task IDs in repository artifacts. Do not run another audit turn in response to this message.`
-
 type SessionInfo = {
   id?: string
   parentID?: string
@@ -34,7 +32,6 @@ type ApiResult<T> = {
 
 type SessionClient = {
   get: (parameters: unknown) => Promise<ApiResult<SessionInfo> | SessionInfo | undefined>
-  promptAsync: (parameters: unknown) => Promise<ApiResult<void> | undefined>
 }
 
 type PluginContext = {
@@ -45,6 +42,7 @@ type PluginContext = {
 
 type KanbanDependencies = {
   hooksDisabled: () => boolean
+  reconciling: () => boolean
   runKb: (args: readonly string[], cwd: string) => Promise<string | undefined>
 }
 
@@ -56,6 +54,7 @@ async function runKb(args: readonly string[], cwd: string): Promise<string | und
       stdin: "ignore",
       stdout: "pipe",
       stderr: "ignore",
+      env: bun.env,
     })
     const stdout = await new Response(child.stdout).text()
     if ((await child.exited) !== 0) return undefined
@@ -67,6 +66,7 @@ async function runKb(args: readonly string[], cwd: string): Promise<string | und
 
 const defaultDependencies: KanbanDependencies = {
   hooksDisabled: () => (globalThis as any).process?.env?.KB_HOOKS_DISABLED === "1",
+  reconciling: () => (globalThis as any).process?.env?.KB_RECONCILING === "1",
   runKb,
 }
 
@@ -75,10 +75,6 @@ function dataFrom<T>(result: ApiResult<T> | T | undefined): T | undefined {
   if ("error" in result && result.error) return undefined
   if ("data" in result) return result.data
   return result as T
-}
-
-function failed(result: ApiResult<unknown> | undefined): boolean {
-  return !!result && typeof result === "object" && "error" in result && !!result.error
 }
 
 function removeExistingGuidance(system: string[]): void {
@@ -102,6 +98,7 @@ const Kanban = (async (rawContext, rawOptions) => {
   const dependencies = { ...defaultDependencies, ...overrides }
   try {
     if (dependencies.hooksDisabled()) return {}
+    if (dependencies.reconciling()) return {}
 
     const context = rawContext as unknown as PluginContext
     const cwd = context.worktree || context.directory
@@ -109,8 +106,7 @@ const Kanban = (async (rawContext, rawOptions) => {
     if (!project) return {}
 
     const sessionKinds = new Map<string, "top-level" | "child">()
-    const tasksBySession = new Map<string, string>()
-    const auditDispatched = new Set<string>()
+    const reconcileDispatched = new Set<string>()
 
     const rememberSession = (info: SessionInfo | undefined): boolean => {
       if (!info?.id) return false
@@ -124,9 +120,6 @@ const Kanban = (async (rawContext, rawOptions) => {
       if (known) return known === "top-level"
 
       try {
-        // OpenCode 1.18.16's current client uses sessionID. Its PluginInput
-        // declaration still exposes legacy path/body fields, so both aliases
-        // are supplied to the same request until those published types converge.
         const result = await context.client.session.get({
           sessionID,
           directory: cwd,
@@ -140,13 +133,6 @@ const Kanban = (async (rawContext, rawOptions) => {
       }
     }
 
-    const refreshTasks = async (sessionID: string): Promise<boolean> => {
-      const tasks = await dependencies.runKb(["list", "--project", project], cwd)
-      if (tasks === undefined) return false
-      tasksBySession.set(sessionID, tasks || "no open tasks")
-      return true
-    }
-
     const hooks = {
       event: async ({ event }: { event: any }) => {
         try {
@@ -157,34 +143,16 @@ const Kanban = (async (rawContext, rawOptions) => {
 
           if (event.type === "session.deleted") {
             const sessionID = event.properties?.info?.id
-            if (!sessionID) return
-            sessionKinds.delete(sessionID)
-            tasksBySession.delete(sessionID)
-            auditDispatched.delete(sessionID)
+            if (sessionID) sessionKinds.delete(sessionID)
             return
           }
 
           if (event.type !== "session.idle") return
           const sessionID = event.properties?.sessionID
-          if (!sessionID || auditDispatched.has(sessionID)) return
-          if (!(await isTopLevel(sessionID))) return
-          if (auditDispatched.has(sessionID)) return
-          auditDispatched.add(sessionID)
-          try {
-            if (!(await refreshTasks(sessionID))) throw new Error("kb task refresh failed")
-            const parts = [{ type: "text", text: AUDIT_PROMPT }]
-            const result = await context.client.session.promptAsync({
-              sessionID,
-              directory: cwd,
-              parts,
-              path: { id: sessionID },
-              query: { directory: cwd },
-              body: { parts },
-            })
-            if (failed(result)) throw new Error("OpenCode rejected the kb audit prompt")
-          } catch {
-            auditDispatched.delete(sessionID)
-          }
+          if (!sessionID || !(await isTopLevel(sessionID))) return
+          if (reconcileDispatched.has(sessionID)) return
+          reconcileDispatched.add(sessionID)
+          return await dependencies.runKb(["reconcile", "--session-id", sessionID, "--json"], cwd)
         } catch {
           // Kanban automation is advisory and must never break OpenCode.
         }
@@ -197,9 +165,8 @@ const Kanban = (async (rawContext, rawOptions) => {
         try {
           const sessionID = input.sessionID
           if (!sessionID || !(await isTopLevel(sessionID))) return
-          const refreshed = await refreshTasks(sessionID)
-          const tasks = tasksBySession.get(sessionID)
-          if (!refreshed && !tasks) return
+          const tasks = await dependencies.runKb(["list", "--project", project], cwd)
+          if (tasks === undefined) return
 
           const guidance = `${GUIDANCE_START}\n${OPERATING_PROCEDURE}\n\n### Current open tasks for ${project}\n\n${tasks}\n${GUIDANCE_END}`
           appendGuidance(output.system, guidance)
