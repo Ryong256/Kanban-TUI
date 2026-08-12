@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Ryong256/kanban/internal/db"
 	"github.com/Ryong256/kanban/internal/event"
 	"github.com/spf13/cobra"
 )
@@ -20,11 +19,11 @@ func newListCmd() *cobra.Command {
 		Aliases: []string{"today", "ls"},
 		Short:   "List open tasks (defaults to current project)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			d, err := db.Open()
+			d, closeDB, err := openDB()
 			if err != nil {
 				return err
 			}
-			defer d.Close()
+			defer closeDB()
 			p := ""
 			if !all {
 				p = DetectProjectDB(d, project)
@@ -34,9 +33,11 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 			if len(tasks) == 0 {
-				fmt.Println("no open tasks")
+				outln(cmd, "no open tasks")
 				return nil
 			}
+			now := time.Now().Unix()
+			threshold := 7 * 24 * 60 * 60
 			for _, t := range tasks {
 				when := time.Unix(t.TS, 0).Format("Jan 02 15:04")
 				scope := ""
@@ -48,10 +49,18 @@ func newListCmd() *cobra.Command {
 					proj = " (" + t.Project + ")"
 				}
 				status := ""
-				if t.Status != "" && t.Status != "backlog" {
+				if t.Status != "" && t.Status != event.StatusBacklog {
 					status = " <" + t.Status + ">"
 				}
-				fmt.Printf("#%-4d  %s%s%s%s  %s\n", t.ID, when, proj, scope, status, t.Title)
+				stale := ""
+				if now-t.LastTS > int64(threshold) {
+					stale = fmt.Sprintf(" %dd stale", (now-t.LastTS)/(24*60*60))
+				}
+				flag := ""
+				if t.Flag != "" {
+					flag = " !" + t.Flag
+				}
+				outf(cmd, "#%-4d  %s%s%s%s%s%s  %s\n", t.ID, when, proj, scope, status, flag, stale, t.Title)
 			}
 			return nil
 		},

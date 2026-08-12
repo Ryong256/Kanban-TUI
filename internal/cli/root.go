@@ -27,6 +27,7 @@ func NewRoot() *cobra.Command {
 		newViewCmd(),
 		newProjectCmd(),
 		newDetectProjectCmd(),
+		newReconcileCmd(),
 		newVersionCmd(),
 		newUpdateCmd(),
 	)
