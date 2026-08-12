@@ -10,16 +10,28 @@ LDFLAGS := -X github.com/Ryong256/kanban/internal/buildinfo.Version=$(VERSION) \
            -X github.com/Ryong256/kanban/internal/buildinfo.Date=$(DATE) \
            -X github.com/Ryong256/kanban/internal/buildinfo.SourceDir=$(SRC)
 
-.PHONY: install install-opencode build test version
+.PHONY: install install-all install-opencode install-claude build test version
 
 # Bootstrap install: stamps the binary so `kb update` works from anywhere.
 install:
 	go install -ldflags "$(LDFLAGS)" $(PKG)
 
-# Install only the repository-owned adapter; OpenCode discovers it on restart.
-install-opencode:
+# Install the core plus every adapter.
+install-all: install-opencode install-claude
+
+# Adapters are thin invokers of the core, so an adapter newer than the binary it
+# calls passes flags that binary does not have. Both targets rebuild kb first.
+install-opencode: install
 	install -d "$(OPENCODE_PLUGIN_DIR)"
 	install -m 0644 "$(CURDIR)/integrations/opencode/kanban.ts" "$(OPENCODE_PLUGIN_DIR)/kanban.ts"
+
+# kanban.sh speaks the adapter contract; the stop hook translates it into the
+# Claude Code hook protocol. Both live next to each other because the hook
+# resolves the adapter relative to its own directory.
+install-claude: install
+	install -d "$(HOME)/.claude/hooks"
+	install -m 0755 "$(CURDIR)/integrations/claude/kanban.sh" "$(HOME)/.claude/hooks/kanban.sh"
+	install -m 0755 "$(CURDIR)/integrations/claude/stop-hook.sh" "$(HOME)/.claude/hooks/kanban-reconcile-stop.sh"
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
