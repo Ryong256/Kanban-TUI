@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "kanban-reconcile-schema-v1",
+  "title": "kb reconcile schema v1",
+  "description": "Stable JSON schema for kb reconcile output. Breaking changes require a new schema version.",
+  "type": "object",
+  "required": ["schema_version", "project", "session_id", "dry_run", "session_owned", "stale_review", "errors"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Additive fields only within v1."
+    },
+    "project": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "no_op": {
+      "type": "boolean",
+      "description": "True when the run short-circuited, e.g. recursion guard."
+    },
+    "session_owned": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/task" }
+    },
+    "stale_review": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/task" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "task": {
+      "type": "object",
+      "required": ["id", "project", "title", "status", "closure_condition", "evidence_type", "last_ts"],
+      "properties": {
+        "id": { "type": "integer" },
+        "project": { "type": "string" },
+        "scope": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string" },
+        "closure_condition": { "type": "string" },
+        "evidence_type": { "type": "string" },
+        "evidence_value": { "type": "string" },
+        "session_id": { "type": "string" },
+        "flags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "last_ts": { "type": "integer" },
+        "stale_age_hours": { "type": "integer" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
