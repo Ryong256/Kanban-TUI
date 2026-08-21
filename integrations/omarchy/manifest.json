@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.ryong256.kanban",
+  "name": "Kanban",
+  "version": "1.0.0",
+  "author": "ryong256",
+  "license": "MIT",
+  "description": "Open task count from the kb board, with click-to-open access to the board TUI.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Main.qml"
+  },
+  "barWidget": {
+    "displayName": "Kanban",
+    "description": "Open tasks across every registered project, read from `kb count --json --all`. Clicking opens the board in a terminal, focusing an existing window when one is already up.",
+    "category": "Productivity",
+    "aliases": [
+      "kanban",
+      "kb",
+      "tasks",
+      "todo",
+      "board"
+    ],
+    "allowMultiple": false,
+    "defaults": {
+      "refreshIntervalSec": 30,
+      "hideWhenEmpty": false,
+      "command": "kb",
+      "icon": "󰄹"
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 5,
+        "max": 3600,
+        "step": 5,
+        "defaultValue": 30
+      },
+      {
+        "key": "hideWhenEmpty",
+        "type": "boolean",
+        "label": "Hide the widget when no tasks are open",
+        "defaultValue": false
+      }
+    ]
+  }
+}
