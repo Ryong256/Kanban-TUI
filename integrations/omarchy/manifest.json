@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "ryong256",
   "license": "MIT",
-  "description": "Open task count from the kb board, with click-to-open access to the board TUI.",
+  "description": "Open task indicator for the kb board: an icon in the bar, the count on hover, click to open the board TUI.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Kanban",
-    "description": "Open tasks across every registered project, read from `kb count --json --all`. Clicking opens the board in a terminal, focusing an existing window when one is already up.",
+    "description": "One icon in the bar. Hovering reports open tasks across every registered project, read from `kb count --json --all`; clicking opens the board in a terminal, focusing an existing window when one is already up.",
     "category": "Productivity",
     "aliases": [
       "kanban",

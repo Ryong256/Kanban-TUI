@@ -111,12 +111,19 @@ BarWidget {
     }
   }
 
+  // The bar shows the icon alone. A single total across every project is a
+  // number nobody can act on from a status bar -- it has no notion of the
+  // project in front of you, so it only ever reads as a debt counter that
+  // never visibly drops. The count belongs on hover, where it is asked for.
   WidgetButton {
     id: indicator
     bar: root.bar
-    text: root.empty ? root.icon : root.icon + " " + root.openTasks
-    tooltipText: root.detail !== "" ? root.detail
-                                    : (root.empty ? "No open tasks" : root.openTasks + " open tasks")
+    text: root.icon
+    tooltipText: {
+      if (root.empty) return "No open tasks"
+      var head = root.openTasks + " open tasks"
+      return root.detail !== "" ? head + "\n" + root.detail : head
+    }
     dimmed: root.empty
     fixedHeight: root.barSize
     onPressed: function(mouseButton) { root.openBoard() }

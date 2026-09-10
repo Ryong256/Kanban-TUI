@@ -1,8 +1,9 @@
 # Omarchy bar widget
 
-Open task count for the [Omarchy](https://omarchy.org/) status bar, read from
-`kb count --json --all`. Clicking the widget opens the board TUI, focusing an
-existing window instead of stacking a new terminal on every click.
+Open task indicator for the [Omarchy](https://omarchy.org/) status bar, read
+from `kb count --json --all`. The bar shows the icon alone and reports the
+count on hover; clicking the widget opens the board TUI, focusing an existing
+window instead of stacking a new terminal on every click.
 
 ## Install
 
@@ -28,7 +29,7 @@ hand or with `omarchy bar set io.github.ryong256.kanban <key> <value>`:
 | `refreshIntervalSec` | `30` | Seconds between counts, clamped to 5-3600 |
 | `hideWhenEmpty` | `false` | Drop the widget from the bar when nothing is open |
 | `command` | `kb` | Path to the kb binary, for a session whose PATH does not reach it |
-| `icon` | `󰄹` | Glyph shown before the count |
+| `icon` | `󰄹` | Glyph shown in the bar |
 
 ## Why `--all`
 
