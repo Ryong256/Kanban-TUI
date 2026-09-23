@@ -397,6 +397,15 @@ func (m *Model) renderTaskRow(t event.OpenTask, status string, colWidth int, sho
 		scopeW = 2 // mark + space
 	}
 
+	// Flag: the same "!flag" text kb list prints, so a task whose completion
+	// failed to verify never looks like a healthy one.
+	flagMark := ""
+	flagW := 0
+	if t.Flag != "" {
+		flagMark = "!" + t.Flag
+		flagW = len([]rune(flagMark)) + 1 // mark + space
+	}
+
 	age := ""
 	ageW := 0
 	if showAge(status) {
@@ -406,7 +415,12 @@ func (m *Model) renderTaskRow(t event.OpenTask, status string, colWidth int, sho
 		}
 	}
 
-	titleWidth := colWidth - 2 - accentW - scopeW - ageW
+	// A narrow column keeps the warning but drops the flag name.
+	if flagMark != "" && colWidth-2-accentW-scopeW-flagW-ageW < 4 {
+		flagMark, flagW = "!", 2
+	}
+
+	titleWidth := colWidth - 2 - accentW - scopeW - flagW - ageW
 	if titleWidth < 4 {
 		titleWidth = 4
 		ageW, age = 0, ""
@@ -422,6 +436,9 @@ func (m *Model) renderTaskRow(t event.OpenTask, status string, colWidth int, sho
 	}
 	if scopeMark != "" {
 		plain.WriteString(scopeMark + " ")
+	}
+	if flagMark != "" {
+		plain.WriteString(flagMark + " ")
 	}
 	plain.WriteString(title)
 
@@ -452,6 +469,9 @@ func (m *Model) renderTaskRow(t event.OpenTask, status string, colWidth int, sho
 	}
 	if scopeMark != "" {
 		b.WriteString(dimStyle.Render(scopeMark) + " ")
+	}
+	if flagMark != "" {
+		b.WriteString(warnStyle.Render(flagMark) + " ")
 	}
 	b.WriteString(textStyle.Render(title))
 	if age != "" {

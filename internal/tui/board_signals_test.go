@@ -145,6 +145,24 @@ func TestBoard_scope_marker(t *testing.T) {
 	}
 }
 
+func TestBoard_flag_marker(t *testing.T) {
+	flagged := event.OpenTask{
+		ID: 1, Title: "claimed done", Flag: event.FlagCompletionUnverified, StatusSince: daysAgo(1),
+	}
+	healthy := event.OpenTask{ID: 2, Title: "healthy", StatusSince: daysAgo(1)}
+
+	m := boardModel(t, map[string][]event.OpenTask{event.StatusBacklog: {flagged, healthy}})
+	plain := stripANSI(m.View())
+	if !strings.Contains(plain, "!"+event.FlagCompletionUnverified+" claimed done") {
+		t.Errorf("expected a flag marker on the flagged task; got:\n%s", plain)
+	}
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Contains(line, "healthy") && strings.Contains(line, "!") {
+			t.Errorf("unflagged task must carry no marker; got line %q", line)
+		}
+	}
+}
+
 func TestBoard_filter_narrows_columns(t *testing.T) {
 	m := boardModel(t, map[string][]event.OpenTask{
 		event.StatusBacklog: {
