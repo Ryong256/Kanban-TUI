@@ -7,17 +7,21 @@ window instead of stacking a new terminal on every click.
 
 ## Install
 
-The dotfiles installer symlinks this directory into the Omarchy plugin
-directory, so the directory name on the target machine is the plugin id:
+Copy this directory into the Omarchy plugin directory, where the directory
+name is the plugin id, then place the widget on the bar:
 
 ```sh
-ln -s ~/Projects/Personal/kanban/integrations/omarchy \
-      ~/.config/omarchy/plugins/io.github.ryong256.kanban
+make install-omarchy
 omarchy bar put io.github.ryong256.kanban --section right
 ```
 
+The target installs a copy, not a symlink: checking out a branch or commit
+that predates `integrations/omarchy` would leave a symlink dangling, and
+quickshell skips a dangling plugin without any error. Re-run the target after
+changing the plugin code here; an earlier symlink install is replaced.
+
 `kb` must be on the session PATH, and `kb-view` must be too for the click
-action. Plugin code under `~/.config/omarchy/plugins/` reloads on save.
+action. The installed plugin under `~/.config/omarchy/plugins/` reloads on save.
 
 ## Settings
 
