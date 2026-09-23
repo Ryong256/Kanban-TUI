@@ -245,3 +245,38 @@ func TestBoard_focused_column_is_widest(t *testing.T) {
 		}
 	}
 }
+
+func TestVisibleTasks_matches_id_and_body(t *testing.T) {
+	m := boardModel(t, map[string][]event.OpenTask{
+		event.StatusBacklog: {
+			{ID: 2345, Title: "alpha"},
+			{ID: 17, Title: "beta", Body: sql.NullString{String: "rotate the Webhook secret", Valid: true}},
+			{ID: 18, Title: "gamma"},
+		},
+	})
+	cases := []struct {
+		name   string
+		filter string
+		want   []int64
+	}{
+		{"bare id", "2345", []int64{2345}},
+		{"hash id", "#2345", []int64{2345}},
+		{"body text", "webhook secret", []int64{17}},
+		{"unknown id", "#99999", nil},
+		{"nothing matches", "zzzzz", nil},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			m.filter = tt.filter
+			got := m.visibleTasks(event.StatusBacklog)
+			if len(got) != len(tt.want) {
+				t.Fatalf("visibleTasks(%q) = %d rows, want %d: %+v", tt.filter, len(got), len(tt.want), got)
+			}
+			for i, id := range tt.want {
+				if got[i].ID != id {
+					t.Errorf("row %d: ID = %d, want %d", i, got[i].ID, id)
+				}
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,11 +122,35 @@ func (m *Model) visibleTasks(status string) []event.OpenTask {
 	out := make([]event.OpenTask, 0, len(tasks))
 	for _, t := range tasks {
 		if fuzzyMatch(t.Title, m.filter) ||
-			(t.Scope.Valid && fuzzyMatch(t.Scope.String, m.filter)) {
+			(t.Scope.Valid && fuzzyMatch(t.Scope.String, m.filter)) ||
+			idMatch(t.ID, m.filter) ||
+			(t.Body.Valid && containsFold(t.Body.String, m.filter)) {
 			out = append(out, t)
 		}
 	}
 	return out
+}
+
+// idMatch reports whether filter is a task id ("2345" or "#2345"). It matches
+// by prefix so the task stays in view while the id is still being typed.
+func idMatch(id int64, filter string) bool {
+	digits := strings.TrimPrefix(filter, "#")
+	if digits == "" {
+		return false
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return strings.HasPrefix(strconv.FormatInt(id, 10), digits)
+}
+
+// containsFold is a case-insensitive substring test. Bodies get it instead of
+// fuzzyMatch: a short pattern is a subsequence of almost any paragraph, so a
+// fuzzy body match would keep nearly every task.
+func containsFold(s, sub string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
 }
 
 func (m *Model) viewBoard() string {
@@ -604,7 +629,7 @@ func (m *Model) viewHelp() string {
 		{"H/L", "move the task left / right"},
 		{"1-4", "send the task to a column"},
 		{"enter/i", "open task detail"},
-		{"/", "filter tasks (esc clears)"},
+		{"/", "filter by text or #id (esc clears)"},
 		{"a", "add a task"},
 		{"d", "delete the task (asks first)"},
 		{"n", "turn the task into a note"},
