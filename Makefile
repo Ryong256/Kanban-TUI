@@ -52,6 +52,7 @@ build:
 
 test:
 	go test ./...
+	bash integrations/omarchy/install-harness.sh
 
 version:
 	@echo "$(VERSION) $(DATE) $(SRC)"
