@@ -21,16 +21,21 @@ run() {
 }
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
-# A stale task must reach the agent as a blocking decision naming that task.
+# Stale tasks the session never touched are not the agent's to judge: stay silent.
 fake_adapter '{"schema_version":1,"project":"p","session_id":"s","session_owned":[],
   "stale_review":[{"id":42,"title":"old thing","status":"backlog","stale_age_hours":240}],"errors":[]}'
-out=$(run ses-stale)
+[[ -z "$(run ses-stale)" ]] || fail "hook blocked on stale tasks the session never touched"
+
+# A task this session owns must reach the agent as a short blocking decision.
+fake_adapter '{"schema_version":1,"project":"p","session_id":"s",
+  "session_owned":[{"id":9,"title":"mine","status":"in_progress"}],"stale_review":[],"errors":[]}'
+out=$(run ses-owned)
 [[ "$(printf '%s' "$out" | jq -r '.decision')" == "block" ]] || fail "expected a blocking decision: $out"
-printf '%s' "$out" | jq -r '.reason' | grep -q '#42' || fail "reason does not name the stale task"
-printf '%s' "$out" | jq -r '.reason' | grep -q '10d' || fail "reason does not carry the stale age"
+printf '%s' "$out" | jq -r '.reason' | grep -q '#9' || fail "reason does not name the owned task"
+(( $(printf '%s' "$out" | jq -r '.reason' | wc -l) <= 6 )) || fail "reason is longer than 6 lines"
 
 # Second stop in the same session must not block again.
-[[ -z "$(run ses-stale)" ]] || fail "hook blocked twice in one session"
+[[ -z "$(run ses-owned)" ]] || fail "hook blocked twice in one session"
 
 # An empty board has nothing to audit.
 fake_adapter '{"schema_version":1,"project":"p","session_id":"s","session_owned":[],"stale_review":[],"errors":[]}'

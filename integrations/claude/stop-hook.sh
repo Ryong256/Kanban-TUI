@@ -38,52 +38,22 @@ printf '%s' "$result" | jq -e . >/dev/null 2>&1 || exit 0
 # A suppressed nested run has nothing to say.
 [[ "$(printf '%s' "$result" | jq -r '.no_op // false')" == "true" ]] && exit 0
 
+# Only what this session touched blocks the stop. Stale rows from other work are
+# not the agent's to judge; they belong to `kb reconcile` run by a human.
 owned=$(printf '%s' "$result" | jq -r '
   .session_owned // [] | map("  #\(.id) [\(.status)] \(.title)") | join("\n")')
-stale=$(printf '%s' "$result" | jq -r '
-  .stale_review // [] | map("  #\(.id) [\(.status)] \(.title) — \((.stale_age_hours // 0) / 24 | floor)d sin moverse") | join("\n")')
 flagged=$(printf '%s' "$result" | jq -r '
-  [(.session_owned // []) + (.stale_review // []) | .[] | select((.flags // []) | index("completion-unverified"))]
-  | map("  #\(.id) \(.title)") | join("\n")')
+  .session_owned // [] | map(select((.flags // []) | index("completion-unverified")))
+  | map("#\(.id)") | join(" ")')
 
-# Nothing owned, nothing stale, nothing flagged — let the session end quietly.
-[[ -z "$owned" && -z "$stale" && -z "$flagged" ]] && exit 0
+[[ -z "$owned" ]] && exit 0
 
-sections=""
-[[ -n "$owned" ]] && sections+="Tareas de esta sesión:
-
+reason="Kanban: tareas de esta sesión:
 $owned
-
-¿Alguna quedó terminada? → kb done <id> --evidence \"<salida real del test>\"
-¿Alguna avanzó sin terminarse? → kb move <id> <status>
-
-"
-[[ -n "$flagged" ]] && sections+="Cierres sin verificar (la evidencia no validó):
-
-$flagged
-
-Corregí la evidencia o dejá la tarea abierta. No la cierres a mano.
-
-"
-[[ -n "$stale" ]] && sections+="Sin moverse hace tiempo:
-
-$stale
-
-¿Siguen siendo trabajo real? Si no, kb rm <id>. Si sí, movelas o dejalas.
-
-"
-
-reason=$(cat <<EOF
-Kanban reconcile (una sola vez por sesión).
-
-${sections}Trabajo futuro nuevo, sólo si tiene condición de cierre verificable:
-  kb add "..." --closure="esto se cierra cuando ___" --evidence=test-output
-
-Lo que ya pasó y no requiere acción va como nota, NO como tarea:
-  kb note "..." --body="detalle"
-
-Si no aplica nada, respondé "reconcile-clean".
-EOF
-)
+Terminada → kb done <id> --evidence \"<salida del test>\" · Avanzó → kb move <id> <status>"
+[[ -n "$flagged" ]] && reason+="
+Cierres sin verificar: $flagged — corregí la evidencia, no la cierres a mano."
+reason+="
+Si no aplica, respondé \"reconcile-clean\"."
 
 jq -n --arg msg "$reason" '{decision: "block", reason: $msg}'
